@@ -1,0 +1,6 @@
+{
+  "name": "GeoFly - Planejador de Voo e Waypoints",
+  "description": "Planejador profissional de missões e voos de drones com acompanhamento de terreno SRTM, cálculo de GSD e sobreposição, divisão automática para limite DJI (200 waypoints) e exportação KMZ/KML/UTM.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
