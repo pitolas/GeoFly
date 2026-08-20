@@ -27,13 +27,9 @@ export default function App() {
   const [selectedDrone, setSelectedDrone] = useState<DroneCameraProfile>(DRONE_PROFILES[0]);
   const [config, setConfig] = useState<FlightConfig>(DEFAULT_FLIGHT_CONFIG);
 
-  // Geographic state
-  const [polygon, setPolygon] = useState<[number, number][]>(SAMPLE_MISSIONS[0].polygon);
-  const [takeoffPoint, setTakeoffPoint] = useState<TakeoffPoint | undefined>({
-    lat: SAMPLE_MISSIONS[0].polygon[0][0] - 0.0005,
-    lng: SAMPLE_MISSIONS[0].polygon[0][1] - 0.0005,
-    elevationMsl: 540.0
-  });
+  // Geographic state (starts clean without initial flight plan)
+  const [polygon, setPolygon] = useState<[number, number][]>([]);
+  const [takeoffPoint, setTakeoffPoint] = useState<TakeoffPoint | undefined>(undefined);
 
   // Calculated flight plan
   const [flightLines, setFlightLines] = useState<FlightLine[]>([]);
