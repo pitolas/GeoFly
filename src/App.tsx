@@ -6,7 +6,8 @@ import {
   Waypoint,
   FlightLine,
   TakeoffPoint,
-  ElevationPoint
+  ElevationPoint,
+  SimDronePosition
 } from './types';
 import { DRONE_PROFILES, DEFAULT_FLIGHT_CONFIG } from './constants/drones';
 import { SAMPLE_MISSIONS } from './constants/sampleMissions';
@@ -16,7 +17,7 @@ import {
   calculateOptimalFlightAngle
 } from './utils/geometry';
 import { updateWaypointsWithTerrainData } from './utils/srtm';
-import { exportDjiKmz } from './utils/exporters';
+import { exportDjiKmz, exportGoogleEarthKmz } from './utils/exporters';
 import { MapView } from './components/MapView';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -50,13 +51,7 @@ export default function App() {
   // Modals & Simulation
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
-  const [simDronePosition, setSimDronePosition] = useState<{
-    lat: number;
-    lng: number;
-    heading: number;
-    altAgl: number;
-    altMsl: number;
-  } | null>(null);
+  const [simDronePosition, setSimDronePosition] = useState<SimDronePosition | null>(null);
 
   // Calculate flight mission whenever polygon, drone, or flight config changes
   useEffect(() => {
@@ -213,7 +208,12 @@ export default function App() {
     }
   };
 
-  const handleExportKmzQuick = async () => {
+  const handleExportGoogleEarthKmz = async () => {
+    if (waypoints.length === 0) return;
+    await exportGoogleEarthKmz(missionName, polygon, waypoints, takeoffPoint, config.altitudeMode);
+  };
+
+  const handleExportDjiKmz = async () => {
     if (waypoints.length === 0) return;
     await exportDjiKmz(missionName, polygon, waypoints, selectedDrone, config, takeoffPoint);
   };
@@ -226,7 +226,8 @@ export default function App() {
         setMissionName={setMissionName}
         stats={stats}
         onOpenImportModal={() => setIsImportModalOpen(true)}
-        onExportKmz={handleExportKmzQuick}
+        onExportGoogleEarthKmz={handleExportGoogleEarthKmz}
+        onExportDjiKmz={handleExportDjiKmz}
         waypointsCount={waypoints.length}
       />
 

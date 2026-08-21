@@ -130,3 +130,16 @@ export interface WeatherReport {
   sunAzimuthDeg: number;
   flightCondition: 'EXCELLENT' | 'GOOD' | 'CAUTION' | 'POOR';
 }
+
+export interface SimDronePosition {
+  lat: number;
+  lng: number;
+  heading: number;
+  altAgl: number;
+  altMsl: number;
+  speedMs: number;
+  currentWpIndex: number;
+  photosTaken: number;
+  flownPath: [number, number][];
+  isTakingPhoto?: boolean;
+}

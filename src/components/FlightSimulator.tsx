@@ -1,5 +1,6 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { Waypoint, FlightConfig } from '../types';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
+import { Waypoint, FlightConfig, SimDronePosition } from '../types';
+import { getDistanceM, getBearing } from '../utils/geometry';
 import {
   Play,
   Pause,
@@ -11,7 +12,9 @@ import {
   Zap,
   FastForward,
   Navigation,
-  Wind
+  Crosshair,
+  Radio,
+  CheckCircle2
 } from 'lucide-react';
 
 interface FlightSimulatorProps {
@@ -19,7 +22,7 @@ interface FlightSimulatorProps {
   config: FlightConfig;
   isSimulating: boolean;
   setIsSimulating: (sim: boolean) => void;
-  onDronePositionChange: (pos: { lat: number; lng: number; heading: number; altAgl: number; altMsl: number } | null) => void;
+  onDronePositionChange: (pos: SimDronePosition | null) => void;
 }
 
 export const FlightSimulator: React.FC<FlightSimulatorProps> = ({
@@ -30,117 +33,284 @@ export const FlightSimulator: React.FC<FlightSimulatorProps> = ({
   onDronePositionChange
 }) => {
   const [currentWpIndex, setCurrentWpIndex] = useState(0);
-  const [playbackSpeed, setPlaybackSpeed] = useState(2); // 2x default
+  const [playbackSpeed, setPlaybackSpeed] = useState(3); // 3x default for smooth overview
   const [photosTaken, setPhotosTaken] = useState(0);
   const [elapsedSec, setElapsedSec] = useState(0);
+  const [followDrone, setFollowDrone] = useState(true);
+
   const animFrameRef = useRef<number | null>(null);
-  const lastTimeRef = useRef<number | null>(null);
+  const lastTimestampRef = useRef<number | null>(null);
+  const elapsedSecRef = useRef<number>(0);
+  const isSimulatingRef = useRef<boolean>(isSimulating);
+  const playbackSpeedRef = useRef<number>(playbackSpeed);
+  const onDronePositionChangeRef = useRef(onDronePositionChange);
+  const lastPhotoTriggerWpIndex = useRef<number>(-1);
 
-  const totalTimeSec = waypoints[waypoints.length - 1]?.cumulativeTimeSec || 1;
+  // Keep refs synchronized
+  isSimulatingRef.current = isSimulating;
+  playbackSpeedRef.current = playbackSpeed;
+  onDronePositionChangeRef.current = onDronePositionChange;
 
-  // Handle Play/Pause and animation loop
+  // Build timeline for all waypoints with exact accumulated distances and times
+  const timeline = useMemo(() => {
+    if (waypoints.length < 2) return { points: [], totalDurationSec: 1, totalDistanceM: 0 };
+
+    const speed = Math.max(1, config.flightSpeedMs || 10);
+    const points: {
+      wp: Waypoint;
+      timeStartSec: number;
+      timeEndSec: number;
+      durationSec: number;
+      segmentDistM: number;
+      cumDistM: number;
+      bearing: number;
+    }[] = [];
+
+    let currentCumSec = 0;
+    let currentCumDist = 0;
+
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      const curr = waypoints[i];
+      const next = waypoints[i + 1];
+      const dist = getDistanceM(curr.lat, curr.lng, next.lat, next.lng);
+      const segTime = dist / speed;
+      const bearing = getBearing(curr.lat, curr.lng, next.lat, next.lng);
+
+      points.push({
+        wp: curr,
+        timeStartSec: currentCumSec,
+        timeEndSec: currentCumSec + segTime,
+        durationSec: segTime,
+        segmentDistM: dist,
+        cumDistM: currentCumDist,
+        bearing
+      });
+
+      currentCumSec += segTime;
+      currentCumDist += dist;
+    }
+
+    return {
+      points,
+      totalDurationSec: Math.max(1, currentCumSec),
+      totalDistanceM: currentCumDist
+    };
+  }, [waypoints, config.flightSpeedMs]);
+
+  // Interpolate state at any given second
+  const computeStateAtTime = (tSec: number): SimDronePosition => {
+    if (waypoints.length < 2 || timeline.points.length === 0) {
+      const wp = waypoints[0] || { lat: 0, lng: 0, altitudeAgl: 0, altitudeMsl: 0, headingDeg: 0 };
+      return {
+        lat: wp.lat,
+        lng: wp.lng,
+        heading: wp.headingDeg,
+        altAgl: wp.altitudeAgl,
+        altMsl: wp.altitudeMsl,
+        speedMs: config.flightSpeedMs,
+        currentWpIndex: 0,
+        photosTaken: 0,
+        flownPath: [[wp.lat, wp.lng]]
+      };
+    }
+
+    const clampedSec = Math.max(0, Math.min(tSec, timeline.totalDurationSec));
+
+    // Find the active segment
+    let segIdx = 0;
+    for (let i = 0; i < timeline.points.length; i++) {
+      if (clampedSec <= timeline.points[i].timeEndSec || i === timeline.points.length - 1) {
+        segIdx = i;
+        break;
+      }
+    }
+
+    const seg = timeline.points[segIdx];
+    const wpA = waypoints[segIdx];
+    const wpB = waypoints[segIdx + 1] || wpA;
+
+    const segProgress =
+      seg.durationSec > 0.001
+        ? Math.max(0, Math.min(1, (clampedSec - seg.timeStartSec) / seg.durationSec))
+        : 1;
+
+    // Linear interpolation
+    const lat = wpA.lat + (wpB.lat - wpA.lat) * segProgress;
+    const lng = wpA.lng + (wpB.lng - wpA.lng) * segProgress;
+    const altAgl = wpA.altitudeAgl + (wpB.altitudeAgl - wpA.altitudeAgl) * segProgress;
+    const altMsl = wpA.altitudeMsl + (wpB.altitudeMsl - wpA.altitudeMsl) * segProgress;
+    const heading = seg.bearing;
+
+    // Build flown path breadcrumbs
+    const path: [number, number][] = [];
+    for (let i = 0; i <= segIdx; i++) {
+      path.push([waypoints[i].lat, waypoints[i].lng]);
+    }
+    path.push([lat, lng]);
+
+    // Count photos taken up to current segment
+    const photos = waypoints.slice(0, segIdx + 1).filter((w) => w.isPhotoPoint).length;
+
+    // Check if we just hit a photo point
+    const isTakingPhoto = wpA.isPhotoPoint && segProgress < 0.2;
+
+    return {
+      lat,
+      lng,
+      heading,
+      altAgl,
+      altMsl,
+      speedMs: config.flightSpeedMs,
+      currentWpIndex: segIdx,
+      photosTaken: photos,
+      flownPath: path,
+      isTakingPhoto
+    };
+  };
+
+  // Main simulation animation loop
   useEffect(() => {
     if (!isSimulating || waypoints.length < 2) {
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-      lastTimeRef.current = null;
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+      lastTimestampRef.current = null;
       return;
     }
 
-    const step = (timestamp: number) => {
-      if (!lastTimeRef.current) lastTimeRef.current = timestamp;
-      const deltaSec = ((timestamp - lastTimeRef.current) / 1000) * playbackSpeed;
-      lastTimeRef.current = timestamp;
+    // Immediately push initial drone position on starting simulation
+    const initialState = computeStateAtTime(elapsedSecRef.current);
+    onDronePositionChangeRef.current(initialState);
 
-      setElapsedSec((prev) => {
-        const nextSec = prev + deltaSec;
-        if (nextSec >= totalTimeSec) {
-          setIsSimulating(false);
-          return totalTimeSec;
-        }
+    const loop = (timestamp: number) => {
+      if (!isSimulatingRef.current) return;
 
-        // Find corresponding waypoint interpolation
-        let targetIndex = 0;
-        for (let i = 0; i < waypoints.length; i++) {
-          if (waypoints[i].cumulativeTimeSec >= nextSec) {
-            targetIndex = i;
-            break;
-          }
-        }
+      if (lastTimestampRef.current === null) {
+        lastTimestampRef.current = timestamp;
+      }
 
-        setCurrentWpIndex(targetIndex);
+      const deltaMs = timestamp - lastTimestampRef.current;
+      lastTimestampRef.current = timestamp;
 
-        // Interpolate position between waypoints[targetIndex - 1] and waypoints[targetIndex]
-        const p1 = targetIndex > 0 ? waypoints[targetIndex - 1] : waypoints[0];
-        const p2 = waypoints[targetIndex] || waypoints[waypoints.length - 1];
+      // Advance clock in seconds with playback speed
+      const deltaSec = (deltaMs / 1000) * playbackSpeedRef.current;
+      elapsedSecRef.current += deltaSec;
 
-        const segDuration = Math.max(0.1, p2.cumulativeTimeSec - p1.cumulativeTimeSec);
-        const segProgress = Math.min(1, Math.max(0, (nextSec - p1.cumulativeTimeSec) / segDuration));
+      if (elapsedSecRef.current >= timeline.totalDurationSec) {
+        elapsedSecRef.current = timeline.totalDurationSec;
+        const finalState = computeStateAtTime(timeline.totalDurationSec);
+        onDronePositionChangeRef.current(finalState);
+        setElapsedSec(timeline.totalDurationSec);
+        setIsSimulating(false);
+        return;
+      }
 
-        const lat = p1.lat + (p2.lat - p1.lat) * segProgress;
-        const lng = p1.lng + (p2.lng - p1.lng) * segProgress;
-        const altAgl = p1.altitudeAgl + (p2.altitudeAgl - p1.altitudeAgl) * segProgress;
-        const altMsl = p1.altitudeMsl + (p2.altitudeMsl - p1.altitudeMsl) * segProgress;
-        const heading = p1.headingDeg;
+      const state = computeStateAtTime(elapsedSecRef.current);
+      onDronePositionChangeRef.current(state);
 
-        onDronePositionChange({ lat, lng, heading, altAgl, altMsl });
+      // Update UI state
+      setElapsedSec(elapsedSecRef.current);
+      setCurrentWpIndex(state.currentWpIndex);
+      setPhotosTaken(state.photosTaken);
 
-        // Photos taken count
-        const photos = waypoints.slice(0, targetIndex + 1).filter((w) => w.isPhotoPoint).length;
-        setPhotosTaken(photos);
-
-        return nextSec;
-      });
-
-      animFrameRef.current = requestAnimationFrame(step);
+      animFrameRef.current = requestAnimationFrame(loop);
     };
 
-    animFrameRef.current = requestAnimationFrame(step);
+    animFrameRef.current = requestAnimationFrame(loop);
 
     return () => {
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+      lastTimestampRef.current = null;
     };
-  }, [isSimulating, waypoints, playbackSpeed, totalTimeSec, onDronePositionChange, setIsSimulating]);
-
-  const handleReset = () => {
-    setIsSimulating(false);
-    setElapsedSec(0);
-    setCurrentWpIndex(0);
-    setPhotosTaken(0);
-    onDronePositionChange(null);
-  };
+  }, [isSimulating, waypoints, timeline, config.flightSpeedMs, setIsSimulating]);
 
   const handleTogglePlay = () => {
     if (waypoints.length < 2) return;
-    if (elapsedSec >= totalTimeSec) {
+    if (elapsedSecRef.current >= timeline.totalDurationSec) {
+      elapsedSecRef.current = 0;
       setElapsedSec(0);
     }
     setIsSimulating(!isSimulating);
   };
 
-  const currentWp = waypoints[currentWpIndex] || waypoints[0];
-  const batteryPct = Math.max(5, Math.round(100 - (elapsedSec / (25 * 60)) * 100));
-  const progressPct = Math.min(100, Math.round((elapsedSec / totalTimeSec) * 100));
+  const handleReset = () => {
+    setIsSimulating(false);
+    elapsedSecRef.current = 0;
+    setElapsedSec(0);
+    setCurrentWpIndex(0);
+    setPhotosTaken(0);
+    lastTimestampRef.current = null;
+    if (waypoints.length > 0) {
+      const initial = computeStateAtTime(0);
+      onDronePositionChange(initial);
+    } else {
+      onDronePositionChange(null);
+    }
+  };
 
-  if (waypoints.length < 2) return null;
+  const handleScrubberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newSec = parseFloat(e.target.value);
+    elapsedSecRef.current = newSec;
+    setElapsedSec(newSec);
+    const state = computeStateAtTime(newSec);
+    setCurrentWpIndex(state.currentWpIndex);
+    setPhotosTaken(state.photosTaken);
+    onDronePositionChange(state);
+  };
+
+  const currentWp = waypoints[currentWpIndex] || waypoints[0];
+  const totalTimeSec = timeline.totalDurationSec;
+  const progressPct = Math.min(100, Math.round((elapsedSec / totalTimeSec) * 100));
+  const batteryPct = Math.max(5, Math.round(100 - (elapsedSec / (25 * 60)) * 100));
+
+  if (waypoints.length < 2) {
+    return (
+      <div className="bg-slate-950/70 p-6 rounded-3xl border border-slate-800 text-center flex flex-col items-center gap-3">
+        <Navigation className="w-8 h-8 text-slate-600 animate-pulse" />
+        <span className="text-sm font-bold text-slate-300">Nenhum plano de voo disponível</span>
+        <p className="text-xs text-slate-500 max-w-xs">
+          Desenhe um polígono no mapa ou carregue uma missão de exemplo para habilitar a simulação em tempo real.
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-3 bg-slate-900/80 backdrop-blur-md rounded-2xl p-4 border border-slate-800">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-3 bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 rounded-3xl p-4 border border-slate-800 shadow-2xl">
+      {/* Simulator Header & Speed Selectors */}
+      <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
         <div className="flex items-center gap-2">
-          <div className={`w-2.5 h-2.5 rounded-full ${isSimulating ? 'bg-rose-500 animate-ping' : 'bg-slate-600'}`} />
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-            Simulador de Telemetria de Voo
-          </h3>
+          <div
+            className={`w-3 h-3 rounded-full flex items-center justify-center transition-all ${
+              isSimulating ? 'bg-emerald-500 shadow-lg shadow-emerald-500/50' : 'bg-slate-700'
+            }`}
+          >
+            {isSimulating && <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />}
+          </div>
+          <div className="flex flex-col">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-100 flex items-center gap-1.5">
+              <span>Simulador de Telemetria de Voo</span>
+            </h3>
+            <span className="text-[10px] text-cyan-400 font-medium">
+              {isSimulating ? 'Voo em execução no mapa' : 'Pronto para simular'}
+            </span>
+          </div>
         </div>
 
-        {/* Speed multiplier selector */}
-        <div className="flex items-center gap-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800">
-          {[1, 2, 5, 10].map((spd) => (
+        {/* Speed multipliers */}
+        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+          {[1, 2, 3, 5, 10].map((spd) => (
             <button
               key={spd}
               onClick={() => setPlaybackSpeed(spd)}
-              className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
-                playbackSpeed === spd ? 'bg-cyan-500 text-slate-950 font-extrabold' : 'text-slate-400 hover:text-slate-200'
+              className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all ${
+                playbackSpeed === spd
+                  ? 'bg-cyan-500 text-slate-950 font-extrabold shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               {spd}x
@@ -149,100 +319,119 @@ export const FlightSimulator: React.FC<FlightSimulatorProps> = ({
         </div>
       </div>
 
-      {/* Primary Telemetry Instrument Grid */}
+      {/* Primary Cockpit Instruments Display */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono">
-        <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800 flex flex-col">
-          <span className="text-[10px] text-slate-400 font-sans uppercase">Altitude AGL</span>
-          <div className="flex items-baseline gap-1 mt-0.5">
-            <span className="text-base font-bold text-cyan-400">
+        <div className="bg-slate-950/80 p-2.5 rounded-2xl border border-slate-800/80 flex flex-col">
+          <span className="text-[10px] text-slate-400 font-sans uppercase font-bold">Altitude AGL</span>
+          <div className="flex items-baseline gap-1 mt-1">
+            <span className="text-base font-extrabold text-cyan-400">
               {currentWp ? currentWp.altitudeAgl.toFixed(1) : '0.0'}
             </span>
             <span className="text-[10px] text-slate-400">m</span>
           </div>
+          <span className="text-[9px] text-slate-500 font-sans">
+            MSL: {currentWp ? currentWp.altitudeMsl.toFixed(1) : '0'}m
+          </span>
         </div>
 
-        <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800 flex flex-col">
-          <span className="text-[10px] text-slate-400 font-sans uppercase">Velocidade</span>
-          <div className="flex items-baseline gap-1 mt-0.5">
-            <span className="text-base font-bold text-emerald-400">
+        <div className="bg-slate-950/80 p-2.5 rounded-2xl border border-slate-800/80 flex flex-col">
+          <span className="text-[10px] text-slate-400 font-sans uppercase font-bold">Velocidade</span>
+          <div className="flex items-baseline gap-1 mt-1">
+            <span className="text-base font-extrabold text-emerald-400">
               {config.flightSpeedMs.toFixed(1)}
             </span>
-            <span className="text-[10px] text-slate-400">m/s ({(config.flightSpeedMs * 3.6).toFixed(0)} km/h)</span>
+            <span className="text-[10px] text-slate-400">m/s</span>
           </div>
+          <span className="text-[9px] text-slate-500 font-sans">
+            {(config.flightSpeedMs * 3.6).toFixed(0)} km/h
+          </span>
         </div>
 
-        <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800 flex flex-col">
-          <span className="text-[10px] text-slate-400 font-sans uppercase">Fotos Registradas</span>
-          <div className="flex items-baseline gap-1 mt-0.5">
-            <span className="text-base font-bold text-amber-400">{photosTaken}</span>
-            <span className="text-[10px] text-slate-400">capturas</span>
+        <div className="bg-slate-950/80 p-2.5 rounded-2xl border border-slate-800/80 flex flex-col">
+          <span className="text-[10px] text-slate-400 font-sans uppercase font-bold">Fotos Capturadas</span>
+          <div className="flex items-baseline gap-1 mt-1">
+            <span className="text-base font-extrabold text-amber-400">{photosTaken}</span>
+            <span className="text-[10px] text-slate-400">
+              /{waypoints.filter((w) => w.isPhotoPoint).length}
+            </span>
           </div>
+          <span className="text-[9px] text-amber-500/80 font-sans flex items-center gap-1">
+            <Camera className="w-2.5 h-2.5" /> Disparos OK
+          </span>
         </div>
 
-        <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800 flex flex-col">
-          <span className="text-[10px] text-slate-400 font-sans uppercase">Bateria Estimada</span>
-          <div className="flex items-center gap-1.5 mt-0.5">
+        <div className="bg-slate-950/80 p-2.5 rounded-2xl border border-slate-800/80 flex flex-col">
+          <span className="text-[10px] text-slate-400 font-sans uppercase font-bold">Bateria Estimada</span>
+          <div className="flex items-center gap-1.5 mt-1">
             <span
-              className={`text-base font-bold ${
-                batteryPct > 30 ? 'text-emerald-400' : batteryPct > 15 ? 'text-amber-400' : 'text-rose-400'
+              className={`text-base font-extrabold ${
+                batteryPct > 35 ? 'text-emerald-400' : batteryPct > 20 ? 'text-amber-400' : 'text-rose-400'
               }`}
             >
               {batteryPct}%
             </span>
             <Battery className="w-3.5 h-3.5 text-slate-400" />
           </div>
+          <span className="text-[9px] text-slate-500 font-sans">1 Bateria em uso</span>
         </div>
       </div>
 
-      {/* Progress scrubber bar */}
-      <div className="flex flex-col gap-1 mt-1">
-        <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
-          <span>
-            Tempo: {Math.floor(elapsedSec / 60)}:{(elapsedSec % 60).toFixed(0).padStart(2, '0')}
+      {/* Interactive Timeline Scrubber */}
+      <div className="flex flex-col gap-1.5 bg-slate-950/60 p-3 rounded-2xl border border-slate-800/60">
+        <div className="flex items-center justify-between text-[11px] font-mono text-slate-300">
+          <span className="text-cyan-400 font-bold">
+            {Math.floor(elapsedSec / 60)}:{(elapsedSec % 60).toFixed(0).padStart(2, '0')}
           </span>
-          <span>
-            WPT #{currentWp?.id || 1} de {waypoints.length} ({progressPct}%)
+          <span className="text-slate-400">
+            WPT #{currentWp?.id || 1} / {waypoints.length} ({progressPct}%)
           </span>
-          <span>
-            Total: {Math.floor(totalTimeSec / 60)}:{(totalTimeSec % 60).toFixed(0).padStart(2, '0')}
+          <span className="text-slate-400">
+            {Math.floor(totalTimeSec / 60)}:{(totalTimeSec % 60).toFixed(0).padStart(2, '0')}
           </span>
         </div>
-        <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800 cursor-pointer">
-          <div
-            className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 transition-all duration-75"
-            style={{ width: `${progressPct}%` }}
-          />
-        </div>
+
+        <input
+          type="range"
+          min={0}
+          max={totalTimeSec}
+          step={0.1}
+          value={elapsedSec}
+          onChange={handleScrubberChange}
+          className="w-full accent-cyan-400 cursor-pointer h-2 bg-slate-900 rounded-lg"
+        />
       </div>
 
-      {/* Controls Bar */}
+      {/* Control Buttons */}
       <div className="flex items-center justify-between pt-1">
         <div className="flex items-center gap-2">
           <button
             id="btn-play-sim"
             onClick={handleTogglePlay}
-            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+            className={`px-4 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 shadow-lg transition-all cursor-pointer ${
               isSimulating
-                ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/30 hover:bg-amber-400'
-                : 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/30 hover:bg-cyan-400'
+                ? 'bg-amber-500 text-slate-950 hover:bg-amber-400 shadow-amber-500/25 ring-2 ring-amber-400/40'
+                : 'bg-cyan-500 text-slate-950 hover:bg-cyan-400 shadow-cyan-500/25 ring-2 ring-cyan-400/40'
             }`}
           >
-            {isSimulating ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-            <span>{isSimulating ? 'Pausar Voo' : 'Iniciar Simulação'}</span>
+            {isSimulating ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current" />}
+            <span>{isSimulating ? 'Pausar Simulação' : 'Iniciar Simulação'}</span>
           </button>
 
           <button
             id="btn-reset-sim"
             onClick={handleReset}
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors border border-slate-800"
-            title="Reiniciar simulador"
+            className="p-2.5 rounded-2xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors border border-slate-800 cursor-pointer"
+            title="Reiniciar simulador para o ponto inicial"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="text-[11px] font-mono text-slate-400">
-          Azimute Drone: <span className="text-cyan-400 font-bold">{currentWp?.headingDeg || 0}°</span>
+        <div className="flex items-center gap-2">
+          <div className="text-[11px] font-mono text-slate-400 bg-slate-950 px-2.5 py-1.5 rounded-xl border border-slate-800 flex items-center gap-1.5">
+            <Compass className="w-3.5 h-3.5 text-cyan-400" />
+            <span>{currentWp?.headingDeg || 0}°</span>
+          </div>
         </div>
       </div>
     </div>

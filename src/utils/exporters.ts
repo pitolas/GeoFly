@@ -131,6 +131,21 @@ export function generateGoogleEarthKml(
   return kml;
 }
 
+/** Export standard Google Earth KMZ file (compressed doc.kml) */
+export async function exportGoogleEarthKmz(
+  missionName: string,
+  polygon: [number, number][],
+  waypoints: Waypoint[],
+  takeoffPoint?: TakeoffPoint,
+  altitudeMode: string = 'relativeToGround'
+): Promise<void> {
+  const zip = new JSZip();
+  const kml = generateGoogleEarthKml(missionName, polygon, waypoints, takeoffPoint, altitudeMode);
+  zip.file('doc.kml', kml);
+  const content = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.google-earth.kmz' });
+  downloadFile(`${cleanFilename(missionName)}_GoogleEarth.kmz`, content, 'application/vnd.google-earth.kmz');
+}
+
 /** Generate DJI WPML XML / KML files inside KMZ */
 export function generateDjiWpmlFiles(
   missionName: string,

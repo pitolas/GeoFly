@@ -6,13 +6,15 @@ import {
   Waypoint,
   TakeoffPoint,
   ElevationPoint,
-  GridType
+  GridType,
+  SimDronePosition
 } from '../types';
 import { DRONE_PROFILES } from '../constants/drones';
 import { SAMPLE_MISSIONS } from '../constants/sampleMissions';
 import { calculateAltitudeFromGsd } from '../utils/geometry';
 import {
   exportDjiKmz,
+  exportGoogleEarthKmz,
   generateGoogleEarthKml,
   generateLitchiCsv,
   generateUtmTopographyCsv,
@@ -38,6 +40,7 @@ import {
   Zap,
   Info,
   CheckCircle,
+  Globe,
   HelpCircle,
   FolderOpen
 } from 'lucide-react';
@@ -62,7 +65,7 @@ interface SidebarProps {
   onOpenImportModal: () => void;
   isSimulating: boolean;
   setIsSimulating: (sim: boolean) => void;
-  onDronePositionChange: (pos: { lat: number; lng: number; heading: number; altAgl: number; altMsl: number } | null) => void;
+  onDronePositionChange: (pos: SimDronePosition | null) => void;
   selectedWaypointId?: number | null;
   onSelectWaypoint?: (wp: Waypoint) => void;
 }
@@ -122,15 +125,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }));
   };
 
-  const handleExportKmz = async () => {
+  const handleExportDjiKmz = async () => {
     if (waypoints.length === 0) return;
     setExportLoading(true);
     try {
       await exportDjiKmz('Missao_GeoFly', polygon, waypoints, selectedDrone, config, takeoffPoint);
     } catch (err: any) {
-      console.error('Error exporting KMZ:', err);
+      console.error('Error exporting DJI KMZ:', err);
     } finally {
       setExportLoading(false);
+    }
+  };
+
+  const handleExportGoogleEarthKmz = async () => {
+    if (waypoints.length === 0) return;
+    try {
+      await exportGoogleEarthKmz('Missao_GeoFly', polygon, waypoints, takeoffPoint, config.altitudeMode);
+    } catch (err: any) {
+      console.error('Error exporting Google Earth KMZ:', err);
     }
   };
 
@@ -617,27 +629,56 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     Exportar para DJI Fly / DJI Pilot 2 (.KMZ)
                   </h3>
                 </div>
-                <span className="text-[10px] bg-cyan-500/20 text-cyan-400 font-bold px-2 py-0.5 rounded-full">
+                <span className="text-[10px] bg-cyan-500/20 text-cyan-400 font-bold px-2 py-0.5 rounded-full border border-cyan-500/30">
                   WPML Oficial
                 </span>
               </div>
 
               <p className="text-xs text-slate-300 leading-relaxed">
-                Gera o arquivo KMZ com tags WPML completas, velocidade, disparos automáticos de fotos e acompanhamento de relevo. Se a missão tiver mais de 200 pontos, é automaticamente particionada em partes separadas (Parte 1, Parte 2...).
+                Gera o arquivo KMZ com tags WPML completas, velocidade, disparos automáticos de fotos e acompanhamento de relevo SRTM. Se a missão tiver mais de 200 pontos, é automaticamente particionada em partes separadas (Parte 1, Parte 2...).
               </p>
 
               <button
                 id="btn-export-dji-kmz"
-                onClick={handleExportKmz}
+                onClick={handleExportDjiKmz}
                 disabled={exportLoading || waypoints.length === 0}
                 className="w-full bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-slate-950 font-extrabold py-3 px-4 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/25 transition-all cursor-pointer"
               >
                 <Download className="w-4 h-4" />
                 <span>
                   {exportLoading
-                    ? 'Empacotando KMZ...'
-                    : `Baixar Missão DJI KMZ (${waypoints.length} waypoints)`}
+                    ? 'Empacotando KMZ DJI...'
+                    : `Baixar KMZ DJI (${waypoints.length} waypoints)`}
                 </span>
+              </button>
+            </div>
+
+            {/* Google Earth KMZ Card */}
+            <div className="bg-slate-950/90 p-4 rounded-3xl border border-slate-800 flex flex-col gap-2.5 shadow-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Globe className="w-5 h-5 text-blue-400" />
+                  <h3 className="text-sm font-bold text-slate-100">
+                    Google Earth (.KMZ)
+                  </h3>
+                </div>
+                <span className="text-[10px] bg-blue-500/20 text-blue-400 font-bold px-2 py-0.5 rounded-full border border-blue-500/30">
+                  Compactado KMZ
+                </span>
+              </div>
+
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Arquivo KMZ compactado contendo doc.kml com polígono, caminho 3D e waypoints para visualização no Google Earth Pro ou Web.
+              </p>
+
+              <button
+                id="btn-export-google-earth-kmz"
+                onClick={handleExportGoogleEarthKmz}
+                disabled={waypoints.length === 0}
+                className="w-full bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 disabled:opacity-50 text-slate-100 font-bold py-2.5 px-4 rounded-2xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
+              >
+                <Download className="w-4 h-4 text-cyan-400" />
+                <span>Baixar KMZ (Google Earth)</span>
               </button>
             </div>
 

@@ -18,7 +18,8 @@ interface HeaderProps {
   setMissionName: (name: string) => void;
   stats: MissionStats | null;
   onOpenImportModal: () => void;
-  onExportKmz: () => void;
+  onExportGoogleEarthKmz: () => void;
+  onExportDjiKmz: () => void;
   waypointsCount: number;
 }
 
@@ -27,7 +28,8 @@ export const Header: React.FC<HeaderProps> = ({
   setMissionName,
   stats,
   onOpenImportModal,
-  onExportKmz,
+  onExportGoogleEarthKmz,
+  onExportDjiKmz,
   waypointsCount
 }) => {
   return (
@@ -113,18 +115,32 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           onClick={onOpenImportModal}
           className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs font-semibold text-slate-200 transition-colors"
+          title="Importar polígono (.KML, .KMZ, .GeoJSON ou coordenadas)"
         >
           <Upload className="w-3.5 h-3.5 text-cyan-400" />
           <span>Importar</span>
         </button>
 
         <button
-          onClick={onExportKmz}
+          id="btn-header-export-kmz"
+          onClick={onExportGoogleEarthKmz}
           disabled={waypointsCount === 0}
-          className="flex items-center gap-1.5 px-3.5 py-1.5 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 rounded-xl text-xs font-extrabold shadow-md shadow-cyan-500/20 transition-all"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed border border-slate-700 hover:border-cyan-500/50 text-slate-200 rounded-xl text-xs font-bold transition-all"
+          title="Baixar arquivo KMZ para Google Earth"
+        >
+          <Download className="w-3.5 h-3.5 text-cyan-400" />
+          <span>Baixar KMZ</span>
+        </button>
+
+        <button
+          id="btn-header-export-dji-kmz"
+          onClick={onExportDjiKmz}
+          disabled={waypointsCount === 0}
+          className="flex items-center gap-1.5 px-3.5 py-1.5 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 rounded-xl text-xs font-extrabold shadow-md shadow-cyan-500/25 transition-all"
+          title="Baixar arquivo KMZ no formato oficial DJI WPML (para DJI Fly, DJI RC e DJI Pilot 2)"
         >
           <Download className="w-3.5 h-3.5" />
-          <span>Baixar KMZ</span>
+          <span>Baixar KMZ DJI</span>
         </button>
       </div>
     </header>

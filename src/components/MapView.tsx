@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
-import { Waypoint, FlightLine, TakeoffPoint, UtmCoordinate } from '../types';
+import { Waypoint, FlightLine, TakeoffPoint, UtmCoordinate, SimDronePosition } from '../types';
 import { latLngToUtm } from '../utils/geometry';
 import { fetchCoordinateElevation } from '../utils/srtm';
 import {
@@ -53,7 +53,7 @@ interface MapViewProps {
   selectedWaypointId?: number | null;
   onSelectWaypoint?: (wp: Waypoint) => void;
   isSimulating: boolean;
-  simDronePosition?: { lat: number; lng: number; heading: number; altAgl: number; altMsl: number } | null;
+  simDronePosition?: SimDronePosition | null;
   gridType: 'single' | 'double' | 'corridor' | 'perimeter';
   drawingMode: 'none' | 'polygon' | 'corridor' | 'takeoff';
   setDrawingMode: (mode: 'none' | 'polygon' | 'corridor' | 'takeoff') => void;
@@ -84,6 +84,8 @@ export const MapView: React.FC<MapViewProps> = ({
   const waypointsLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const takeoffMarkerRef = useRef<L.Marker | null>(null);
   const simDroneMarkerRef = useRef<L.Marker | null>(null);
+  const simFlownPolylineRef = useRef<L.Polyline | null>(null);
+  const simFlashMarkerRef = useRef<L.CircleMarker | null>(null);
   const searchMarkerRef = useRef<L.Marker | null>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
@@ -580,7 +582,7 @@ export const MapView: React.FC<MapViewProps> = ({
     }
   }, [takeoffPoint, setTakeoffPoint]);
 
-  // Render Live Simulation Drone Icon
+  // Render Live Simulation Drone Icon, Flown Trail and Photo Flash
   useEffect(() => {
     if (!mapRef.current) return;
     const map = mapRef.current;
@@ -590,38 +592,138 @@ export const MapView: React.FC<MapViewProps> = ({
         map.removeLayer(simDroneMarkerRef.current);
         simDroneMarkerRef.current = null;
       }
+      if (simFlownPolylineRef.current) {
+        map.removeLayer(simFlownPolylineRef.current);
+        simFlownPolylineRef.current = null;
+      }
+      if (simFlashMarkerRef.current) {
+        map.removeLayer(simFlashMarkerRef.current);
+        simFlashMarkerRef.current = null;
+      }
       return;
     }
 
+    // High-visibility Quadcopter SVG with rotating rotors and heading arrow
     const droneHtml = `
       <div style="
-        width: 34px;
-        height: 34px;
-        transform: rotate(${simDronePosition.heading}deg);
+        position: relative;
+        width: 48px;
+        height: 48px;
         display: flex;
         align-items: center;
         justify-content: center;
       ">
-        <svg viewBox="0 0 24 24" width="34" height="34" fill="#ef4444" stroke="#ffffff" stroke-width="1.5">
-          <path d="M12 2L4 21l8-4 8 4L12 2z"/>
-        </svg>
+        <!-- Directional Drone Body & Rotors -->
+        <div style="
+          width: 44px;
+          height: 44px;
+          transform: rotate(${simDronePosition.heading}deg);
+          transition: transform 0.08s linear;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        ">
+          <svg viewBox="0 0 64 64" width="44" height="44" style="filter: drop-shadow(0 0 6px rgba(6,182,212,0.9));">
+            <!-- Drone Arms -->
+            <line x1="16" y1="16" x2="48" y2="48" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+            <line x1="48" y1="16" x2="16" y2="48" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+            
+            <!-- Motor Hubs & Rotors -->
+            <circle cx="16" cy="16" r="6" fill="#0ea5e9" stroke="#ffffff" stroke-width="2"/>
+            <circle cx="48" cy="16" r="6" fill="#0ea5e9" stroke="#ffffff" stroke-width="2"/>
+            <circle cx="16" cy="48" r="6" fill="#0ea5e9" stroke="#ffffff" stroke-width="2"/>
+            <circle cx="48" cy="48" r="6" fill="#0ea5e9" stroke="#ffffff" stroke-width="2"/>
+            
+            <!-- Central Fuselage -->
+            <circle cx="32" cy="32" r="11" fill="#0284c7" stroke="#ffffff" stroke-width="2.5"/>
+            
+            <!-- Direction Heading Pointer (Front Arrow) -->
+            <polygon points="32,15 37,28 32,24 27,28" fill="#facc15" stroke="#ffffff" stroke-width="1"/>
+            
+            <!-- Center LED Pulse -->
+            <circle cx="32" cy="32" r="4" fill="#38bdf8"/>
+          </svg>
+        </div>
+
+        <!-- Altitude Badge Tag -->
+        <div style="
+          position: absolute;
+          bottom: -10px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: rgba(2, 6, 23, 0.9);
+          border: 1px solid #06b6d4;
+          border-radius: 6px;
+          padding: 1px 4px;
+          color: #38bdf8;
+          font-family: monospace;
+          font-size: 9px;
+          font-weight: 800;
+          white-space: nowrap;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+          pointer-events: none;
+        ">
+          ${simDronePosition.altAgl.toFixed(0)}m AGL
+        </div>
       </div>
     `;
 
     const droneIcon = L.divIcon({
-      className: 'sim-drone-icon',
+      className: 'sim-drone-marker',
       html: droneHtml,
-      iconSize: [34, 34],
-      iconAnchor: [17, 17]
+      iconSize: [48, 48],
+      iconAnchor: [24, 24]
     });
 
     if (!simDroneMarkerRef.current) {
-      simDroneMarkerRef.current = L.marker([simDronePosition.lat, simDronePosition.lng], { icon: droneIcon }).addTo(
-        map
-      );
+      simDroneMarkerRef.current = L.marker([simDronePosition.lat, simDronePosition.lng], {
+        icon: droneIcon,
+        zIndexOffset: 2000
+      }).addTo(map);
     } else {
       simDroneMarkerRef.current.setLatLng([simDronePosition.lat, simDronePosition.lng]);
       simDroneMarkerRef.current.setIcon(droneIcon);
+    }
+
+    // Draw active Flown Path trail
+    if (simDronePosition.flownPath && simDronePosition.flownPath.length > 1) {
+      if (!simFlownPolylineRef.current) {
+        simFlownPolylineRef.current = L.polyline(simDronePosition.flownPath, {
+          color: '#06b6d4',
+          weight: 4,
+          opacity: 0.9,
+          lineCap: 'round',
+          lineJoin: 'round'
+        }).addTo(map);
+      } else {
+        simFlownPolylineRef.current.setLatLngs(simDronePosition.flownPath);
+      }
+    }
+
+    // Photo shutter flash effect on map
+    if (simDronePosition.isTakingPhoto) {
+      if (!simFlashMarkerRef.current) {
+        simFlashMarkerRef.current = L.circleMarker([simDronePosition.lat, simDronePosition.lng], {
+          radius: 18,
+          color: '#fbbf24',
+          weight: 3,
+          fillColor: '#fef08a',
+          fillOpacity: 0.7
+        }).addTo(map);
+      } else {
+        simFlashMarkerRef.current.setLatLng([simDronePosition.lat, simDronePosition.lng]);
+        simFlashMarkerRef.current.setStyle({ fillOpacity: 0.7, opacity: 1 });
+      }
+    } else if (simFlashMarkerRef.current) {
+      map.removeLayer(simFlashMarkerRef.current);
+      simFlashMarkerRef.current = null;
+    }
+
+    // Smoothly pan map if drone is nearing edge of screen
+    const mapBounds = map.getBounds();
+    const droneLatLng = L.latLng(simDronePosition.lat, simDronePosition.lng);
+    if (!mapBounds.pad(-0.1).contains(droneLatLng)) {
+      map.panTo(droneLatLng, { animate: true, duration: 0.2 });
     }
   }, [isSimulating, simDronePosition]);
 
