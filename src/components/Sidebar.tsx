@@ -42,22 +42,17 @@ import {
   CheckCircle,
   Globe,
   HelpCircle,
-  FolderOpen,
-  Trash2,
-  Spline,
-  Pencil
+  FolderOpen
 } from 'lucide-react';
 
 interface SidebarProps {
+  missionName?: string;
   config: FlightConfig;
   setConfig: React.Dispatch<React.SetStateAction<FlightConfig>>;
   selectedDrone: DroneCameraProfile;
   setSelectedDrone: (drone: DroneCameraProfile) => void;
   stats: MissionStats | null;
   polygon: [number, number][];
-  setPolygon?: (poly: [number, number][]) => void;
-  drawingMode?: 'none' | 'polygon' | 'corridor' | 'takeoff';
-  setDrawingMode?: (mode: 'none' | 'polygon' | 'corridor' | 'takeoff') => void;
   waypoints: Waypoint[];
   takeoffPoint?: TakeoffPoint;
   elevationProfile: ElevationPoint[];
@@ -79,15 +74,13 @@ interface SidebarProps {
 export type SidebarTab = 'params' | 'terrain' | 'waypoints' | 'export' | 'simulation' | 'checklist';
 
 export const Sidebar: React.FC<SidebarProps> = ({
+  missionName = 'Missao_GeoFly',
   config,
   setConfig,
   selectedDrone,
   setSelectedDrone,
   stats,
   polygon,
-  setPolygon,
-  drawingMode,
-  setDrawingMode,
   waypoints,
   takeoffPoint,
   elevationProfile,
@@ -138,7 +131,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (waypoints.length === 0) return;
     setExportLoading(true);
     try {
-      await exportDjiKmz('Missao_GeoFly', polygon, waypoints, selectedDrone, config, takeoffPoint);
+      await exportDjiKmz(missionName, polygon, waypoints, selectedDrone, config, takeoffPoint);
     } catch (err: any) {
       console.error('Error exporting DJI KMZ:', err);
     } finally {
@@ -149,7 +142,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const handleExportGoogleEarthKmz = async () => {
     if (waypoints.length === 0) return;
     try {
-      await exportGoogleEarthKmz('Missao_GeoFly', polygon, waypoints, takeoffPoint, config.altitudeMode);
+      await exportGoogleEarthKmz(missionName, polygon, waypoints, takeoffPoint, config.altitudeMode);
     } catch (err: any) {
       console.error('Error exporting Google Earth KMZ:', err);
     }
@@ -157,26 +150,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const handleExportKml = () => {
     if (waypoints.length === 0) return;
-    const kml = generateGoogleEarthKml('Missao_GeoFly', polygon, waypoints, takeoffPoint, config.altitudeMode);
-    downloadFile('Missao_GeoFly_GoogleEarth.kml', kml, 'application/vnd.google-earth.kml+xml');
+    const kml = generateGoogleEarthKml(missionName, polygon, waypoints, takeoffPoint, config.altitudeMode);
+    downloadFile(`${missionName}_GoogleEarth.kml`, kml, 'application/vnd.google-earth.kml+xml');
   };
 
   const handleExportLitchi = () => {
     if (waypoints.length === 0) return;
     const csv = generateLitchiCsv(waypoints, config);
-    downloadFile('Missao_GeoFly_Litchi.csv', csv, 'text/csv');
+    downloadFile(`${missionName}_Litchi.csv`, csv, 'text/csv');
   };
 
   const handleExportUtm = () => {
     if (waypoints.length === 0) return;
-    const csv = generateUtmTopographyCsv('Missao_GeoFly', waypoints);
-    downloadFile('Coordenadas_UTM_Topografia.csv', csv, 'text/csv');
+    const csv = generateUtmTopographyCsv(missionName, waypoints);
+    downloadFile(`${missionName}_Coordenadas_UTM_Topografia.csv`, csv, 'text/csv');
   };
 
   const handleExportGeoJson = () => {
     if (waypoints.length === 0) return;
-    const geojson = generateGeoJson('Missao_GeoFly', polygon, waypoints);
-    downloadFile('Missao_GeoFly_QGIS.geojson', geojson, 'application/geo+json');
+    const geojson = generateGeoJson(missionName, polygon, waypoints);
+    downloadFile(`${missionName}_QGIS.geojson`, geojson, 'application/geo+json');
   };
 
   return (
@@ -354,65 +347,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </button>
                 ))}
               </div>
-            </div>
-
-            {/* Area de Voo & Desenho */}
-            <div className="bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800 flex flex-col gap-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-200">Área de Voo & Desenho</span>
-                {polygon.length > 0 && (
-                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-cyan-950 border border-cyan-800 text-cyan-300">
-                    {polygon.length} {polygon.length === 1 ? 'ponto' : 'pontos'}
-                  </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  onClick={() => setDrawingMode?.(drawingMode === 'polygon' ? 'none' : 'polygon')}
-                  className={`py-2 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
-                    drawingMode === 'polygon'
-                      ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/30'
-                      : 'bg-slate-900 text-slate-200 border border-slate-800 hover:bg-slate-800'
-                  }`}
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                  <span>{drawingMode === 'polygon' ? 'Desenhando...' : 'Desenhar Polígono'}</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setConfig((prev) => ({ ...prev, gridType: 'corridor' }));
-                    setDrawingMode?.(drawingMode === 'corridor' ? 'none' : 'corridor');
-                  }}
-                  className={`py-2 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
-                    drawingMode === 'corridor'
-                      ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/30'
-                      : 'bg-slate-900 text-slate-200 border border-slate-800 hover:bg-slate-800'
-                  }`}
-                >
-                  <Spline className="w-3.5 h-3.5" />
-                  <span>{drawingMode === 'corridor' ? 'Desenhando...' : 'Desenhar Corredor'}</span>
-                </button>
-              </div>
-
-              {polygon.length > 0 && (
-                <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-                  <span className="text-[11px] text-slate-400">
-                    Área: <strong className="text-cyan-400 font-mono">{(stats?.totalAreaHa ?? 0).toFixed(2)} ha</strong>
-                  </span>
-                  <button
-                    onClick={() => {
-                      setPolygon?.([]);
-                      setDrawingMode?.('none');
-                    }}
-                    className="text-[11px] text-rose-400 hover:text-rose-300 flex items-center gap-1 hover:underline"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    <span>Limpar Área</span>
-                  </button>
-                </div>
-              )}
             </div>
 
             {/* Corridor Width (if Corridor mode) */}
@@ -818,39 +752,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
 
             {/* Step by step guide for loading into DJI */}
-            <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 flex flex-col gap-2.5 mt-1">
+            <div className="bg-slate-950/70 p-4 rounded-2xl border border-slate-800 flex flex-col gap-2.5 mt-1">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-200 flex items-center gap-1.5">
                 <HelpCircle className="w-4 h-4 text-cyan-400" />
-                <span>Como importar o KMZ no DJI Fly / DJI RC:</span>
+                <span>Como importar e voar no DJI Fly / RC / Pilot:</span>
               </span>
-              
-              <div className="text-xs text-slate-300 flex flex-col gap-2 leading-relaxed">
-                <div className="flex items-start gap-2">
-                  <span className="bg-cyan-950 text-cyan-400 font-bold px-1.5 py-0.5 rounded text-[10px] border border-cyan-800 shrink-0">1</span>
-                  <span>Baixe o arquivo <b>.KMZ</b> oficial WPML clicando no botão acima.</span>
-                </div>
-                
-                <div className="flex items-start gap-2">
-                  <span className="bg-cyan-950 text-cyan-400 font-bold px-1.5 py-0.5 rounded text-[10px] border border-cyan-800 shrink-0">2</span>
-                  <span>Conecte o seu controle (DJI RC, DJI RC 2, DJI RC Pro) ou celular ao computador via cabo USB-C (ou use cartão MicroSD).</span>
+              <div className="flex flex-col gap-2 text-xs text-slate-300">
+                <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800 flex flex-col gap-1">
+                  <span className="font-bold text-cyan-400 text-[11px]">DJI Fly (Mini 4 Pro / Air 3 / Mavic 3 / RC / RC 2):</span>
+                  <ol className="list-decimal list-inside text-slate-400 space-y-0.5 text-[11px] leading-relaxed">
+                    <li>Copie o arquivo <b>.KMZ</b> baixado para o controle ou celular.</li>
+                    <li>Pasta padrão no Android: <code className="text-cyan-300 bg-slate-950 px-1 py-0.5 rounded text-[10px]">Android/data/dji.go.v5/files/waypoint</code></li>
+                    <li>No DJI Fly: abra a câmera, toque no ícone de <b>Waypoints</b> à esquerda, abra a <b>Biblioteca</b> e clique no ícone de <b>Importar KMZ</b>.</li>
+                  </ol>
                 </div>
 
-                <div className="flex items-start gap-2">
-                  <span className="bg-cyan-950 text-cyan-400 font-bold px-1.5 py-0.5 rounded text-[10px] border border-cyan-800 shrink-0">3</span>
-                  <div>
-                    <span>Copie o arquivo <b>.kmz</b> para o diretório de trajetórias do DJI Fly:</span>
-                    <div className="mt-1 bg-slate-900/90 p-2 rounded-xl font-mono text-[10px] text-cyan-300 border border-slate-800 select-all">
-                      Android/data/dji.go.v5/files/waypoint
-                    </div>
-                    <span className="text-[10px] text-slate-400 block mt-1">
-                      (Dica: se estiver no DJI Fly versão recente, você também pode abrir o menu <b>Trajetória (Waypoints) &gt; Biblioteca &gt; Importar KMZ</b>).
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-2">
-                  <span className="bg-cyan-950 text-cyan-400 font-bold px-1.5 py-0.5 rounded text-[10px] border border-cyan-800 shrink-0">4</span>
-                  <span>Abra o <b>DJI Fly</b>, ligue o drone, selecione a missão na biblioteca de Waypoints e inicie o voo com segurança!</span>
+                <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800 flex flex-col gap-1">
+                  <span className="font-bold text-emerald-400 text-[11px]">DJI Pilot 2 (Mavic 3 Enterprise / M3M / Matrice 350):</span>
+                  <ol className="list-decimal list-inside text-slate-400 space-y-0.5 text-[11px] leading-relaxed">
+                    <li>No menu principal do DJI Pilot 2, entre em <b>Rota de Voo (Flight Route)</b>.</li>
+                    <li>Toque em <b>Importar Rota (KMZ)</b> e selecione o arquivo gerado.</li>
+                  </ol>
                 </div>
               </div>
             </div>

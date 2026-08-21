@@ -146,53 +146,49 @@ export async function exportGoogleEarthKmz(
   downloadFile(`${cleanFilename(missionName)}_GoogleEarth.kmz`, content, 'application/vnd.google-earth.kmz');
 }
 
-/** Helper to map drone model to DJI WPML Enumeration Values */
-export function getDjiDroneAndPayloadEnum(droneId: string): { droneEnum: number; droneSubEnum: number; payloadEnum: number } {
+/** Generate DJI WPML XML / KML files inside KMZ */
+function getDjiDroneInfo(droneId: string): { droneEnumValue: number; droneSubEnumValue: number; payloadEnumValue: number } {
   switch (droneId) {
     case 'dji-mini-4-pro':
+      return { droneEnumValue: 92, droneSubEnumValue: 0, payloadEnumValue: 77 };
     case 'dji-mini-3-12mp':
+      return { droneEnumValue: 67, droneSubEnumValue: 0, payloadEnumValue: 52 };
     case 'dji-mini-2':
-      return { droneEnum: 68, droneSubEnum: 0, payloadEnum: 68 };
+      return { droneEnumValue: 61, droneSubEnumValue: 0, payloadEnumValue: 52 };
     case 'dji-air-3-wide':
+      return { droneEnumValue: 89, droneSubEnumValue: 0, payloadEnumValue: 74 };
     case 'dji-air-2s':
-      return { droneEnum: 89, droneSubEnum: 0, payloadEnum: 52 };
+      return { droneEnumValue: 48, droneSubEnumValue: 0, payloadEnumValue: 43 };
     case 'dji-mavic-3-enterprise':
-      return { droneEnum: 77, droneSubEnum: 0, payloadEnum: 66 }; // M3E mechanical shutter
-    case 'dji-mavic-3-multispectral':
-      return { droneEnum: 77, droneSubEnum: 0, payloadEnum: 68 }; // M3M multispectral
+      return { droneEnumValue: 67, droneSubEnumValue: 0, payloadEnumValue: 52 };
     case 'dji-mavic-3-classic':
-      return { droneEnum: 77, droneSubEnum: 0, payloadEnum: 52 }; // Mavic 3 Classic / Pro
-    case 'dji-matrice-350-p1-35mm':
-      return { droneEnum: 89, droneSubEnum: 0, payloadEnum: 42 }; // M350 RTK + Zenmuse P1
+      return { droneEnumValue: 68, droneSubEnumValue: 0, payloadEnumValue: 52 };
+    case 'dji-mavic-3-multispectral':
+      return { droneEnumValue: 67, droneSubEnumValue: 1, payloadEnumValue: 54 };
     case 'dji-phantom-4-pro-rtk':
-      return { droneEnum: 67, droneSubEnum: 0, payloadEnum: 52 }; // P4 RTK
+      return { droneEnumValue: 44, droneSubEnumValue: 0, payloadEnumValue: 39 };
+    case 'dji-matrice-350-p1-35mm':
+      return { droneEnumValue: 80, droneSubEnumValue: 0, payloadEnumValue: 42 };
     default:
-      // Universal standard enum for DJI Fly / Pilot compatibility
-      return { droneEnum: 68, droneSubEnum: 0, payloadEnum: 52 };
+      return { droneEnumValue: 67, droneSubEnumValue: 0, payloadEnumValue: 52 };
   }
 }
 
-/** Helper to convert UI finishAction to valid DJI WPML enum */
-export function mapFinishActionToWpml(action: string): string {
-  switch (action?.toUpperCase()) {
+function getWpmlFinishAction(action: string): string {
+  switch (action) {
     case 'RTH':
-    case 'GOHOME':
       return 'goHome';
     case 'LAND':
-    case 'AUTOLAND':
       return 'autoLand';
     case 'HOVER':
-    case 'NOACTION':
       return 'noAction';
-    case 'FIRST_WAYPOINT':
-    case 'GOTOFIRSTWAYPOINT':
+    case 'GOTO_FIRST':
       return 'gotoFirstWaypoint';
     default:
       return 'goHome';
   }
 }
 
-/** Generate DJI WPML XML / KML files inside KMZ */
 export function generateDjiWpmlFiles(
   missionName: string,
   waypoints: Waypoint[],
@@ -200,44 +196,41 @@ export function generateDjiWpmlFiles(
   config: FlightConfig,
   takeoffPoint?: TakeoffPoint
 ): { templateKml: string; waylinesWpml: string } {
-  // DJI WPML requires epoch timestamp in milliseconds (integer)
+  // DJI WPML requires Unix timestamp in milliseconds as an integer
   const timestampMs = Date.now();
-  const wpmlFinishAction = mapFinishActionToWpml(config.finishAction);
-  const { droneEnum, droneSubEnum, payloadEnum } = getDjiDroneAndPayloadEnum(config.droneId || camera.id);
+  const droneEnum = getDjiDroneInfo(config.droneId);
+  const finishAction = getWpmlFinishAction(config.finishAction);
   const turnMode = config.curvedTurns ? 'toPointAndStopWithDiscontinuityCurvature' : 'toPointAndStop';
 
-  // 1. Template KML (Contains overall mission configs + template placemarks for DJI Fly / DJI Pilot UI)
-  let templatePlacemarks = '';
-  waypoints.forEach((wp, idx) => {
-    const heading = Math.round(wp.headingDeg);
-    const aglAlt = wp.altitudeAgl.toFixed(2);
-    const mslAlt = wp.altitudeMsl.toFixed(2);
-    const speed = wp.speedMs.toFixed(1);
+  const totalDistance = waypoints.length > 0 ? waypoints[waypoints.length - 1].cumulativeDistanceM : 0;
+  const totalDuration = waypoints.length > 0 ? waypoints[waypoints.length - 1].cumulativeTimeSec : 0;
 
-    templatePlacemarks += `      <Placemark>
+  // Helper to generate placemarks for both template.kml and waylines.wpml
+  const generatePlacemarks = (isTemplate: boolean) => {
+    let placemarksStr = '';
+    waypoints.forEach((wp, idx) => {
+      placemarksStr += `      <Placemark>
         <Point>
           <coordinates>${wp.lng},${wp.lat}</coordinates>
         </Point>
         <wpml:index>${idx}</wpml:index>
-        <wpml:ellipsoidHeight>${mslAlt}</wpml:ellipsoidHeight>
-        <wpml:height>${aglAlt}</wpml:height>
-        <wpml:useGlobalHeight>0</wpml:useGlobalHeight>
-        <wpml:useGlobalSpeed>0</wpml:useGlobalSpeed>
-        <wpml:waypointSpeed>${speed}</wpml:waypointSpeed>
-        <wpml:useGlobalHeadingParam>0</wpml:useGlobalHeadingParam>
+        <wpml:executeHeight>${wp.altitudeAgl.toFixed(2)}</wpml:executeHeight>
+        <wpml:waypointSpeed>${wp.speedMs.toFixed(1)}</wpml:waypointSpeed>
         <wpml:waypointHeadingParam>
           <wpml:waypointHeadingMode>followWayline</wpml:waypointHeadingMode>
-          <wpml:waypointHeadingAngle>${heading}</wpml:waypointHeadingAngle>
+          <wpml:waypointHeadingAngle>${wp.headingDeg}</wpml:waypointHeadingAngle>
           <wpml:waypointPoiPoint>0.000000,0.000000,0.000000</wpml:waypointPoiPoint>
-          <wpml:waypointHeadingAngleEnable>1</wpml:waypointHeadingAngleEnable>
-          <wpml:waypointHeadingPathMode>followBadArc</wpml:waypointHeadingPathMode>
+          <wpml:waypointHeadingAngleEnable>0</wpml:waypointHeadingAngleEnable>
         </wpml:waypointHeadingParam>
-        <wpml:useGlobalTurnParam>0</wpml:useGlobalTurnParam>
         <wpml:waypointTurnParam>
           <wpml:waypointTurnMode>${turnMode}</wpml:waypointTurnMode>
           <wpml:waypointTurnDampingDist>0</wpml:waypointTurnDampingDist>
         </wpml:waypointTurnParam>
-        <wpml:useStraightLine>1</wpml:useStraightLine>
+        <wpml:useGlobalHeight>0</wpml:useGlobalHeight>
+        <wpml:useGlobalSpeed>1</wpml:useGlobalSpeed>
+        <wpml:useGlobalHeadingParam>1</wpml:useGlobalHeadingParam>
+        <wpml:useGlobalTurnParam>1</wpml:useGlobalTurnParam>
+        <wpml:gimbalPitchAngle>${config.gimbalPitchDeg}</wpml:gimbalPitchAngle>
         <wpml:actionGroup>
           <wpml:actionGroupId>${idx}</wpml:actionGroupId>
           <wpml:actionGroupStartIndex>${idx}</wpml:actionGroupStartIndex>
@@ -264,7 +257,6 @@ export function generateDjiWpmlFiles(
             <wpml:actionActuatorFunc>takePhoto</wpml:actionActuatorFunc>
             <wpml:actionActuatorFuncParam>
               <wpml:payloadPositionIndex>0</wpml:payloadPositionIndex>
-              <wpml:fileSuffix>Photo_${idx + 1}</wpml:fileSuffix>
             </wpml:actionActuatorFuncParam>
           </wpml:action>`
               : ''
@@ -272,8 +264,11 @@ export function generateDjiWpmlFiles(
         </wpml:actionGroup>
       </Placemark>
 `;
-  });
+    });
+    return placemarksStr;
+  };
 
+  // 1. Template KML (Required by DJI Fly to display waypoints in editor & mission library)
   const templateKml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:wpml="http://www.dji.com/wpmz/1.0.6">
   <Document>
@@ -282,127 +277,73 @@ export function generateDjiWpmlFiles(
     <wpml:updateTime>${timestampMs}</wpml:updateTime>
     <wpml:missionConfig>
       <wpml:flyToWaylineMode>safely</wpml:flyToWaylineMode>
-      <wpml:finishAction>${wpmlFinishAction}</wpml:finishAction>
+      <wpml:finishAction>${finishAction}</wpml:finishAction>
       <wpml:exitOnRCLost>executeLostAction</wpml:exitOnRCLost>
       <wpml:executeRCLostAction>goBack</wpml:executeRCLostAction>
       <wpml:takeOffSecurityHeight>20</wpml:takeOffSecurityHeight>
-      <wpml:globalTransitionalSpeed>${config.flightSpeedMs}</wpml:globalTransitionalSpeed>
+      <wpml:globalTransitionalSpeed>${config.flightSpeedMs.toFixed(1)}</wpml:globalTransitionalSpeed>
       <wpml:droneInfo>
-        <wpml:droneEnumValue>${droneEnum}</wpml:droneEnumValue>
-        <wpml:droneSubEnumValue>${droneSubEnum}</wpml:droneSubEnumValue>
+        <wpml:droneEnumValue>${droneEnum.droneEnumValue}</wpml:droneEnumValue>
+        <wpml:droneSubEnumValue>${droneEnum.droneSubEnumValue}</wpml:droneSubEnumValue>
       </wpml:droneInfo>
       <wpml:payloadInfo>
-        <wpml:payloadEnumValue>${payloadEnum}</wpml:payloadEnumValue>
+        <wpml:payloadEnumValue>${droneEnum.payloadEnumValue}</wpml:payloadEnumValue>
         <wpml:payloadPositionIndex>0</wpml:payloadPositionIndex>
       </wpml:payloadInfo>
     </wpml:missionConfig>
     <Folder>
       <wpml:templateType>waypoint</wpml:templateType>
       <wpml:templateId>0</wpml:templateId>
-      <wpml:waylineCoordinateSysParam>
-        <wpml:coordinateMode>WGS84</wpml:coordinateMode>
-        <wpml:heightMode>relativeToStartPoint</wpml:heightMode>
-        <wpml:positioningSolution>GPS</wpml:positioningSolution>
-      </wpml:waylineCoordinateSysParam>
-      <wpml:autoFlightSpeed>${config.flightSpeedMs}</wpml:autoFlightSpeed>
-      <wpml:globalHeight>${config.targetAltitudeAgl}</wpml:globalHeight>
+      <wpml:autoFlightSpeed>${config.flightSpeedMs.toFixed(1)}</wpml:autoFlightSpeed>
+      <wpml:globalHeight>${config.targetAltitudeAgl.toFixed(2)}</wpml:globalHeight>
       <wpml:caliFlightEnable>0</wpml:caliFlightEnable>
       <wpml:gimbalPitchMode>usePointSetting</wpml:gimbalPitchMode>
-      <wpml:globalWaypointTurnMode>${turnMode}</wpml:globalWaypointTurnMode>
-      <wpml:globalUseStraightLine>1</wpml:globalUseStraightLine>
-${templatePlacemarks}    </Folder>
+      <wpml:globalWaypointHeadingParam>
+        <wpml:waypointHeadingMode>followWayline</wpml:waypointHeadingMode>
+        <wpml:waypointHeadingAngle>0</wpml:waypointHeadingAngle>
+        <wpml:waypointPoiPoint>0.000000,0.000000,0.000000</wpml:waypointPoiPoint>
+        <wpml:waypointHeadingAngleEnable>0</wpml:waypointHeadingAngleEnable>
+      </wpml:globalWaypointHeadingParam>
+      <wpml:globalWaypointTurnParam>
+        <wpml:waypointTurnMode>${turnMode}</wpml:waypointTurnMode>
+        <wpml:waypointTurnDampingDist>0</wpml:waypointTurnDampingDist>
+      </wpml:globalWaypointTurnParam>
+      <wpml:useGlobalHeight>0</wpml:useGlobalHeight>
+      <wpml:useGlobalSpeed>1</wpml:useGlobalSpeed>
+      <wpml:useGlobalHeadingParam>1</wpml:useGlobalHeadingParam>
+      <wpml:useGlobalTurnParam>1</wpml:useGlobalTurnParam>
+${generatePlacemarks(true)}    </Folder>
   </Document>
 </kml>`;
 
-  // 2. Waylines WPML (Executable flight lines for DJI Flight Controller)
-  let waylinesPlacemarks = '';
-  waypoints.forEach((wp, idx) => {
-    const heading = Math.round(wp.headingDeg);
-    const aglAlt = wp.altitudeAgl.toFixed(2);
-    const mslAlt = wp.altitudeMsl.toFixed(2);
-    const speed = wp.speedMs.toFixed(1);
-
-    waylinesPlacemarks += `      <Placemark>
-        <Point>
-          <coordinates>${wp.lng},${wp.lat}</coordinates>
-        </Point>
-        <wpml:index>${idx}</wpml:index>
-        <wpml:executeHeight>${aglAlt}</wpml:executeHeight>
-        <wpml:ellipsoidHeight>${mslAlt}</wpml:ellipsoidHeight>
-        <wpml:waypointSpeed>${speed}</wpml:waypointSpeed>
-        <wpml:waypointHeadingParam>
-          <wpml:waypointHeadingMode>followWayline</wpml:waypointHeadingMode>
-          <wpml:waypointHeadingAngle>${heading}</wpml:waypointHeadingAngle>
-          <wpml:waypointPoiPoint>0.000000,0.000000,0.000000</wpml:waypointPoiPoint>
-          <wpml:waypointHeadingAngleEnable>1</wpml:waypointHeadingAngleEnable>
-          <wpml:waypointHeadingPathMode>followBadArc</wpml:waypointHeadingPathMode>
-        </wpml:waypointHeadingParam>
-        <wpml:waypointTurnParam>
-          <wpml:waypointTurnMode>${turnMode}</wpml:waypointTurnMode>
-          <wpml:waypointTurnDampingDist>0</wpml:waypointTurnDampingDist>
-        </wpml:waypointTurnParam>
-        <wpml:useStraightLine>1</wpml:useStraightLine>
-        <wpml:actionGroup>
-          <wpml:actionGroupId>${idx}</wpml:actionGroupId>
-          <wpml:actionGroupStartIndex>${idx}</wpml:actionGroupStartIndex>
-          <wpml:actionGroupEndIndex>${idx}</wpml:actionGroupEndIndex>
-          <wpml:actionGroupMode>sequence</wpml:actionGroupMode>
-          <wpml:actionTrigger>
-            <wpml:actionTriggerType>reachPoint</wpml:actionTriggerType>
-          </wpml:actionTrigger>
-          <wpml:action>
-            <wpml:actionId>0</wpml:actionId>
-            <wpml:actionActuatorFunc>gimbalRotate</wpml:actionActuatorFunc>
-            <wpml:actionActuatorFuncParam>
-              <wpml:gimbalRotateMode>absoluteAngle</wpml:gimbalRotateMode>
-              <wpml:gimbalPitchRotateAngle>${config.gimbalPitchDeg}</wpml:gimbalPitchRotateAngle>
-              <wpml:gimbalRollRotateAngle>0</wpml:gimbalRollRotateAngle>
-              <wpml:gimbalYawRotateAngle>0</wpml:gimbalYawRotateAngle>
-              <wpml:payloadPositionIndex>0</wpml:payloadPositionIndex>
-            </wpml:actionActuatorFuncParam>
-          </wpml:action>
-          ${
-            wp.isPhotoPoint
-              ? `<wpml:action>
-            <wpml:actionId>1</wpml:actionId>
-            <wpml:actionActuatorFunc>takePhoto</wpml:actionActuatorFunc>
-            <wpml:actionActuatorFuncParam>
-              <wpml:payloadPositionIndex>0</wpml:payloadPositionIndex>
-              <wpml:fileSuffix>Photo_${idx + 1}</wpml:fileSuffix>
-            </wpml:actionActuatorFuncParam>
-          </wpml:action>`
-              : ''
-          }
-        </wpml:actionGroup>
-      </Placemark>
-`;
-  });
-
+  // 2. Waylines WPML (Used for flight execution)
   const waylinesWpml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:wpml="http://www.dji.com/wpmz/1.0.6">
   <Document>
     <wpml:missionConfig>
       <wpml:flyToWaylineMode>safely</wpml:flyToWaylineMode>
-      <wpml:finishAction>${wpmlFinishAction}</wpml:finishAction>
+      <wpml:finishAction>${finishAction}</wpml:finishAction>
       <wpml:exitOnRCLost>executeLostAction</wpml:exitOnRCLost>
       <wpml:executeRCLostAction>goBack</wpml:executeRCLostAction>
       <wpml:takeOffSecurityHeight>20</wpml:takeOffSecurityHeight>
-      <wpml:globalTransitionalSpeed>${config.flightSpeedMs}</wpml:globalTransitionalSpeed>
+      <wpml:globalTransitionalSpeed>${config.flightSpeedMs.toFixed(1)}</wpml:globalTransitionalSpeed>
       <wpml:droneInfo>
-        <wpml:droneEnumValue>${droneEnum}</wpml:droneEnumValue>
-        <wpml:droneSubEnumValue>${droneSubEnum}</wpml:droneSubEnumValue>
+        <wpml:droneEnumValue>${droneEnum.droneEnumValue}</wpml:droneEnumValue>
+        <wpml:droneSubEnumValue>${droneEnum.droneSubEnumValue}</wpml:droneSubEnumValue>
       </wpml:droneInfo>
       <wpml:payloadInfo>
-        <wpml:payloadEnumValue>${payloadEnum}</wpml:payloadEnumValue>
+        <wpml:payloadEnumValue>${droneEnum.payloadEnumValue}</wpml:payloadEnumValue>
         <wpml:payloadPositionIndex>0</wpml:payloadPositionIndex>
       </wpml:payloadInfo>
     </wpml:missionConfig>
     <Folder>
       <wpml:templateId>0</wpml:templateId>
       <wpml:waylineId>0</wpml:waylineId>
-      <wpml:autoFlightSpeed>${config.flightSpeedMs}</wpml:autoFlightSpeed>
+      <wpml:distance>${totalDistance.toFixed(2)}</wpml:distance>
+      <wpml:duration>${totalDuration.toFixed(2)}</wpml:duration>
+      <wpml:autoFlightSpeed>${config.flightSpeedMs.toFixed(1)}</wpml:autoFlightSpeed>
       <wpml:executeFlightMode>setSpeed</wpml:executeFlightMode>
-${waylinesPlacemarks}    </Folder>
+${generatePlacemarks(false)}    </Folder>
   </Document>
 </kml>`;
 
@@ -422,24 +363,18 @@ export async function exportDjiKmz(
   const numParts = Math.ceil(waypoints.length / maxWp);
 
   if (numParts <= 1) {
-    // Single KMZ file strictly containing wpmz/template.kml & wpmz/waylines.wpml
+    // Single KMZ file for DJI Fly / DJI Pilot 2
+    // Strictly contains wpmz/template.kml and wpmz/waylines.wpml (NO root doc.kml)
     const zip = new JSZip();
     const { templateKml, waylinesWpml } = generateDjiWpmlFiles(missionName, waypoints, camera, config, takeoffPoint);
-    
-    // Official DJI WPML KMZ directory structure
     const wpmzFolder = zip.folder('wpmz');
     if (wpmzFolder) {
       wpmzFolder.file('template.kml', templateKml);
       wpmzFolder.file('waylines.wpml', waylinesWpml);
     }
 
-    const content = await zip.generateAsync({
-      type: 'blob',
-      mimeType: 'application/vnd.google-earth.kmz',
-      compression: 'DEFLATE',
-      compressionOptions: { level: 6 }
-    });
-    downloadFile(`${cleanFilename(missionName)}_DJI_WPML.kmz`, content, 'application/vnd.google-earth.kmz');
+    const content = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.google-earth.kmz' });
+    downloadFile(`${cleanFilename(missionName)}_DJI.kmz`, content, 'application/vnd.google-earth.kmz');
   } else {
     // Multi-part export: Split into Part 1, Part 2... and pack in a master zip
     const masterZip = new JSZip();
@@ -464,17 +399,12 @@ export async function exportDjiKmz(
         wpmzFolder.file('waylines.wpml', waylinesWpml);
       }
 
-      const partBlob = await partZip.generateAsync({
-        type: 'blob',
-        mimeType: 'application/vnd.google-earth.kmz',
-        compression: 'DEFLATE',
-        compressionOptions: { level: 6 }
-      });
+      const partBlob = await partZip.generateAsync({ type: 'blob', mimeType: 'application/vnd.google-earth.kmz' });
       masterZip.file(`${cleanFilename(missionName)}_Parte_${part + 1}_de_${numParts}.kmz`, partBlob);
     }
 
     const masterBlob = await masterZip.generateAsync({ type: 'blob' });
-    downloadFile(`${cleanFilename(missionName)}_DJI_WPML_Dividido_${numParts}_Partes.zip`, masterBlob, 'application/zip');
+    downloadFile(`${cleanFilename(missionName)}_DJI_Dividido_${numParts}_Partes.zip`, masterBlob, 'application/zip');
   }
 }
 

@@ -64,7 +64,7 @@ export async function updateWaypointsWithTerrainData(
   maxElevation: number;
   elevationDiff: number;
 }> {
-  if (!waypoints || waypoints.length === 0) {
+  if (waypoints.length === 0) {
     return {
       updatedWaypoints: [],
       elevationProfile: [],
@@ -78,26 +78,47 @@ export async function updateWaypointsWithTerrainData(
   let takeoffGroundElev = takeoffPoint?.elevationMsl;
   if (takeoffGroundElev === undefined || takeoffGroundElev === 0) {
     const firstWp = waypoints[0];
-    const refLat = takeoffPoint ? takeoffPoint.lat : firstWp.lat;
-    const refLng = takeoffPoint ? takeoffPoint.lng : firstWp.lng;
-    const key = `${refLat.toFixed(4)},${refLng.toFixed(4)}`;
-    takeoffGroundElev = elevationCache.get(key) || getSyntheticElevation(refLat, refLng);
+    takeoffGroundElev = await fetchCoordinateElevation(
+      takeoffPoint ? takeoffPoint.lat : firstWp.lat,
+      takeoffPoint ? takeoffPoint.lng : firstWp.lng
+    );
   }
 
   const updated: Waypoint[] = [];
   const elevationProfile: ElevationPoint[] = [];
+
+  // Batch query to Open-Elevation
+  const locationsQuery = waypoints.map((w) => `${w.lat.toFixed(6)},${w.lng.toFixed(6)}`).join('|');
+  let apiElevations: number[] = [];
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+    const response = await fetch(`https://api.open-elevation.com/api/v1/lookup?locations=${locationsQuery}`, {
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.results && data.results.length === waypoints.length) {
+        apiElevations = data.results.map((r: { elevation: number }) => r.elevation);
+      }
+    }
+  } catch {
+    // Will use fallback
+  }
 
   let minElev = Infinity;
   let maxElev = -Infinity;
 
   for (let i = 0; i < waypoints.length; i++) {
     const wp = waypoints[i];
-    const key = `${wp.lat.toFixed(4)},${wp.lng.toFixed(4)}`;
-    let groundElev = elevationCache.get(key);
+    let groundElev = apiElevations[i];
 
-    if (groundElev === undefined) {
-      groundElev = getSyntheticElevation(wp.lat, wp.lng);
-      elevationCache.set(key, groundElev);
+    if (groundElev === undefined || isNaN(groundElev)) {
+      groundElev = await fetchCoordinateElevation(wp.lat, wp.lng);
     }
 
     minElev = Math.min(minElev, groundElev);
@@ -126,6 +147,10 @@ export async function updateWaypointsWithTerrainData(
       waypointId: wp.id,
       isPhoto: wp.isPhotoPoint
     });
+
+    if (onProgress && i % 10 === 0) {
+      onProgress(Math.round(((i + 1) / waypoints.length) * 100));
+    }
   }
 
   if (onProgress) onProgress(100);

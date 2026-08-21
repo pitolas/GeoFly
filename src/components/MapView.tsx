@@ -333,21 +333,15 @@ export const MapView: React.FC<MapViewProps> = ({
     };
   }, []);
 
-  // Auto zoom to fit polygon when a new polygon is imported or loaded (not while user is actively drawing)
+  // Auto zoom to fit polygon when a new polygon is imported or loaded
   const prevPolygonLengthRef = useRef(polygon.length);
   useEffect(() => {
-    if (drawingMode === 'none' && prevPolygonLengthRef.current === 0 && polygon.length >= 3 && mapRef.current) {
-      try {
-        const bounds = L.latLngBounds(polygon);
-        if (bounds.isValid()) {
-          mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 18 });
-        }
-      } catch (e) {
-        console.warn('fitBounds error:', e);
-      }
+    if (prevPolygonLengthRef.current === 0 && polygon.length > 0 && mapRef.current) {
+      const bounds = L.latLngBounds(polygon);
+      mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 18 });
     }
     prevPolygonLengthRef.current = polygon.length;
-  }, [polygon, drawingMode]);
+  }, [polygon]);
 
   // Switch Tile Layer
   useEffect(() => {
@@ -387,7 +381,7 @@ export const MapView: React.FC<MapViewProps> = ({
     };
   }, [drawingMode, polygon, setPolygon, setTakeoffPoint, setDrawingMode]);
 
-  // Render Polygon or Corridor Boundary and Vertices
+  // Render Polygon and Vertices
   useEffect(() => {
     if (!polygonLayerGroupRef.current || !mapRef.current) return;
     const group = polygonLayerGroupRef.current;
@@ -395,19 +389,17 @@ export const MapView: React.FC<MapViewProps> = ({
 
     if (polygon.length === 0) return;
 
-    const isCorridor = gridType === 'corridor';
-    const isClosedPolygon = !isCorridor && polygon.length >= 3;
-
-    // Render boundary layer
-    if (isCorridor) {
-      const corridorLine = L.polyline(polygon, {
+    if (gridType === 'corridor') {
+      // Render as thick corridor polyline with dashed vertices
+      const polyline = L.polyline(polygon, {
         color: '#06b6d4',
         weight: 4,
         dashArray: '8, 8',
-        opacity: 0.95
+        opacity: 0.9
       });
-      group.addLayer(corridorLine);
-    } else if (isClosedPolygon) {
+      group.addLayer(polyline);
+    } else if (polygon.length >= 3) {
+      // Render as closed polygon
       const poly = L.polygon(polygon, {
         color: '#06b6d4',
         weight: 2.5,
@@ -416,55 +408,47 @@ export const MapView: React.FC<MapViewProps> = ({
         dashArray: '6, 6'
       });
       group.addLayer(poly);
-    } else {
-      const partialLine = L.polyline(polygon, {
+    } else if (polygon.length === 2) {
+      const line = L.polyline(polygon, {
         color: '#06b6d4',
         weight: 2.5,
-        dashArray: '6, 6',
-        opacity: 0.9
+        dashArray: '6, 6'
       });
-      group.addLayer(partialLine);
+      group.addLayer(line);
     }
 
-    // Render vertex markers
+    // Render draggable vertex handles
     polygon.forEach((pt, idx) => {
-      const isStart = idx === 0;
-      const isEnd = idx === polygon.length - 1;
-      const badgeBg = isStart ? '#10b981' : isEnd && isCorridor ? '#f59e0b' : '#06b6d4';
-
       const vertexIcon = L.divIcon({
-        className: 'custom-vertex-handle',
-        html: `
-          <div style="
-            width: 20px;
-            height: 20px;
-            background: ${badgeBg};
-            border: 2px solid #ffffff;
-            border-radius: 50%;
-            box-shadow: 0 0 8px rgba(6,182,212,0.8), 0 2px 4px rgba(0,0,0,0.5);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #ffffff;
-            font-family: monospace;
-            font-size: 10px;
-            font-weight: 800;
-          ">
-            ${idx + 1}
-          </div>
-        `,
-        iconSize: [20, 20],
-        iconAnchor: [10, 10]
+        className: 'custom-vertex-marker',
+        html: `<div style="width: 14px; height: 14px; background: #06b6d4; border: 2px solid #ffffff; border-radius: 50%; box-shadow: 0 0 6px rgba(0,0,0,0.6); cursor: grab;"></div>`,
+        iconSize: [14, 14],
+        iconAnchor: [7, 7]
       });
 
-      const marker = L.marker(pt, { icon: vertexIcon, zIndexOffset: 1000 });
-      marker.bindTooltip(
-        `<b>Vértice #${idx + 1}</b><br/><span style="font-family: monospace; font-size: 10px;">${pt[0].toFixed(6)}, ${pt[1].toFixed(6)}</span>`,
-        { direction: 'top', offset: [0, -10] }
-      );
+      const marker = L.marker(pt, {
+        icon: vertexIcon,
+        draggable: true
+      });
+
+      marker.on('drag', (e: any) => {
+        const newLatLng = e.target.getLatLng();
+        const updated = [...polygon];
+        updated[idx] = [newLatLng.lat, newLatLng.lng];
+        setPolygon(updated);
+      });
+
+      // Right click or double click to remove vertex
+      marker.on('contextmenu', () => {
+        if (polygon.length > 1) {
+          const updated = polygon.filter((_, i) => i !== idx);
+          setPolygon(updated);
+        }
+      });
+
       group.addLayer(marker);
     });
-  }, [polygon, gridType]);
+  }, [polygon, gridType, setPolygon]);
 
   // Render Flight Lines and Waypoints
   useEffect(() => {
@@ -488,31 +472,28 @@ export const MapView: React.FC<MapViewProps> = ({
     });
     pathGroup.addLayer(mainFlightPath);
 
-    // Draw waypoints markers (Only show major turn points and sample photo dots to avoid clustering & browser overload)
+    // Draw waypoints markers (Only show major turn points and sample photo dots to avoid clustering)
     const totalWp = waypoints.length;
-    const maxVisibleMarkers = 80;
-    const step = totalWp > maxVisibleMarkers ? Math.ceil(totalWp / maxVisibleMarkers) : 1;
+    const step = totalWp > 300 ? Math.ceil(totalWp / 150) : 1;
 
     waypoints.forEach((wp, idx) => {
       const isSelected = selectedWaypointId === wp.id;
       const isEndpoint = idx === 0 || idx === waypoints.length - 1;
-      const isTurn = wp.action === 'turn' || wp.action === 'takeoff';
 
-      // Keep DOM fast: Only render endpoint, selected, turn points, and sampled photo points
-      if (!isSelected && !isEndpoint && !isTurn && (idx % step !== 0)) return;
+      if (idx % step !== 0 && !isSelected && !isEndpoint && !wp.isPhotoPoint) return;
 
       const isPhoto = wp.isPhotoPoint;
       const color = isSelected ? '#ef4444' : isPhoto ? '#3b82f6' : '#f59e0b';
-      const size = isSelected ? 16 : isPhoto ? 8 : 12;
+      const size = isSelected ? 16 : isPhoto ? 10 : 12;
 
       const markerHtml = `
         <div style="
           width: ${size}px;
           height: ${size}px;
           background-color: ${color};
-          border: 1.5px solid #ffffff;
+          border: 2px solid #ffffff;
           border-radius: ${isPhoto ? '50%' : '3px'};
-          box-shadow: 0 0 5px rgba(0,0,0,0.6);
+          box-shadow: 0 0 6px rgba(0,0,0,0.7);
           transition: transform 0.15s ease;
           ${isSelected ? 'transform: scale(1.3);' : ''}
         "></div>
@@ -794,16 +775,16 @@ export const MapView: React.FC<MapViewProps> = ({
         
         {/* Top Left: Drawing Controls Bar */}
         <div className="flex flex-col gap-2 pointer-events-auto shrink-0">
-          <div className="bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-xl p-1.5 shadow-2xl flex items-center gap-1.5 flex-wrap">
+          <div className="bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-xl p-1.5 shadow-2xl flex items-center gap-1.5">
             <button
               id="btn-draw-polygon"
               onClick={() => setDrawingMode(drawingMode === 'polygon' ? 'none' : 'polygon')}
               className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
                 drawingMode === 'polygon'
-                  ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/30 font-bold'
+                  ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/30'
                   : 'text-slate-200 hover:bg-slate-800'
               }`}
-              title="Clique no mapa para adicionar novos vértices do polígono"
+              title="Clique no mapa para adicionar vértices do polígono"
             >
               <Pencil className="w-3.5 h-3.5" />
               <span>Polígono</span>
@@ -814,7 +795,7 @@ export const MapView: React.FC<MapViewProps> = ({
               onClick={() => setDrawingMode(drawingMode === 'corridor' ? 'none' : 'corridor')}
               className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
                 drawingMode === 'corridor'
-                  ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/30 font-bold'
+                  ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/30'
                   : 'text-slate-200 hover:bg-slate-800'
               }`}
               title="Clique no mapa para criar traçado de corredor linear"
@@ -828,13 +809,13 @@ export const MapView: React.FC<MapViewProps> = ({
               onClick={() => setDrawingMode(drawingMode === 'takeoff' ? 'none' : 'takeoff')}
               className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
                 drawingMode === 'takeoff'
-                  ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/30 font-bold'
+                  ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/30'
                   : 'text-slate-200 hover:bg-slate-800'
               }`}
               title="Clique no mapa para definir o ponto de decolagem (Home Point)"
             >
               <MapPin className="w-3.5 h-3.5" />
-              <span>Decolagem</span>
+              <span>Decolagem (Home)</span>
             </button>
 
             {polygon.length > 0 && (
@@ -844,7 +825,7 @@ export const MapView: React.FC<MapViewProps> = ({
                   setPolygon([]);
                   setDrawingMode('none');
                 }}
-                className="p-2 rounded-lg text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 transition-colors ml-0.5"
+                className="p-2 rounded-lg text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 transition-colors ml-1"
                 title="Limpar área desenhada"
               >
                 <Trash2 className="w-4 h-4" />
@@ -854,31 +835,13 @@ export const MapView: React.FC<MapViewProps> = ({
 
           {/* Informative helper badge when drawing */}
           {drawingMode !== 'none' && (
-            <div className="bg-slate-900/95 backdrop-blur-md border border-cyan-500/40 rounded-xl p-2.5 text-xs text-slate-100 flex items-center justify-between gap-3 shadow-2xl max-w-md">
-              <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping shrink-0" />
-                <span className="leading-snug">
-                  {drawingMode === 'polygon' && (polygon.length >= 3 ? `${polygon.length} vértices adicionados. Pronto!` : `Clique no mapa para traçar o polígono (${polygon.length}/3 mín)`)}
-                  {drawingMode === 'corridor' && `${polygon.length} pontos de eixo definidos.`}
-                  {drawingMode === 'takeoff' && 'Clique para marcar o ponto de decolagem.'}
-                </span>
-              </div>
-
-              {(drawingMode === 'polygon' && polygon.length >= 3) || (drawingMode === 'corridor' && polygon.length >= 2) ? (
-                <button
-                  onClick={() => setDrawingMode('none')}
-                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 px-2.5 py-1 rounded-lg text-xs font-bold shrink-0 transition-colors shadow-md shadow-cyan-500/30"
-                >
-                  Concluir
-                </button>
-              ) : (
-                <button
-                  onClick={() => setDrawingMode('none')}
-                  className="text-slate-400 hover:text-slate-200 px-2 py-0.5 text-xs"
-                >
-                  Fechar
-                </button>
-              )}
+            <div className="bg-cyan-950/90 backdrop-blur-md border border-cyan-700/50 rounded-lg px-3 py-2 text-xs text-cyan-200 flex items-center gap-2 shadow-lg animate-pulse max-w-sm">
+              <Info className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span>
+                {drawingMode === 'polygon' && 'Clique no mapa para adicionar os pontos da área.'}
+                {drawingMode === 'corridor' && 'Clique no mapa ao longo da rodovia/canal/linha.'}
+                {drawingMode === 'takeoff' && 'Clique onde o drone irá decolar para registrar a cota de referência.'}
+              </span>
             </div>
           )}
         </div>

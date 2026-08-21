@@ -39,18 +39,15 @@ export const ElevationProfileChart: React.FC<ElevationProfileChartProps> = ({
     );
   }
 
-  // Format data for chart (Subsample to max 120 points for smooth 60fps chart rendering)
-  const step = data.length > 120 ? Math.ceil(data.length / 120) : 1;
-  const chartData = data
-    .filter((_, idx) => idx % step === 0 || idx === data.length - 1)
-    .map((pt) => ({
-      dist: Math.round(pt.distanceM),
-      ground: pt.groundElevationMsl,
-      drone: pt.droneAltitudeMsl,
-      clearance: pt.clearanceAgl,
-      id: pt.waypointId,
-      isPhoto: pt.isPhoto
-    }));
+  // Format data for chart
+  const chartData = data.map((pt) => ({
+    dist: Math.round(pt.distanceM),
+    ground: pt.groundElevationMsl,
+    drone: pt.droneAltitudeMsl,
+    clearance: pt.clearanceAgl,
+    id: pt.waypointId,
+    isPhoto: pt.isPhoto
+  }));
 
   const yMin = Math.max(0, Math.floor(minElevation - 10));
   const yMax = Math.ceil(maxElevation + targetAltitudeAgl + 15);

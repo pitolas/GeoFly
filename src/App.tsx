@@ -254,15 +254,13 @@ export default function App() {
 
         {/* Right Planning Sidebar */}
         <Sidebar
+          missionName={missionName}
           config={config}
           setConfig={setConfig}
           selectedDrone={selectedDrone}
           setSelectedDrone={setSelectedDrone}
           stats={stats}
           polygon={polygon}
-          setPolygon={setPolygon}
-          drawingMode={drawingMode}
-          setDrawingMode={setDrawingMode}
           waypoints={waypoints}
           takeoffPoint={takeoffPoint}
           elevationProfile={elevationProfile}
