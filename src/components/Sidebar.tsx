@@ -381,7 +381,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <div className="flex items-center justify-between text-[11px] text-slate-400 bg-slate-900/80 px-2.5 py-1.5 rounded-xl border border-slate-800/80">
                     <span>Tipo: <strong className="text-slate-200">{config.gridType === 'corridor' ? 'Corredor' : 'Polígono'}</strong></span>
                     {stats && (
-                      <span>Área: <strong className="text-cyan-400 font-mono">{stats.areaHectares.toFixed(2)} ha</strong></span>
+                      <span>Área: <strong className="text-cyan-400 font-mono">{(stats.totalAreaHa ?? (stats.totalAreaM2 ? stats.totalAreaM2 / 10000 : 0)).toFixed(2)} ha</strong></span>
                     )}
                   </div>
 
