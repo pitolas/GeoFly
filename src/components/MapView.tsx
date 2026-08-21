@@ -337,15 +337,21 @@ export const MapView: React.FC<MapViewProps> = ({
     };
   }, []);
 
-  // Auto zoom to fit polygon when a new polygon is imported or loaded
+  // Auto zoom to fit polygon when a new polygon is imported or loaded (not while user is actively drawing)
   const prevPolygonLengthRef = useRef(polygon.length);
   useEffect(() => {
-    if (prevPolygonLengthRef.current === 0 && polygon.length > 0 && mapRef.current) {
-      const bounds = L.latLngBounds(polygon);
-      mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 18 });
+    if (drawingMode === 'none' && prevPolygonLengthRef.current === 0 && polygon.length >= 3 && mapRef.current) {
+      try {
+        const bounds = L.latLngBounds(polygon);
+        if (bounds.isValid()) {
+          mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 18 });
+        }
+      } catch (e) {
+        console.warn('fitBounds error:', e);
+      }
     }
     prevPolygonLengthRef.current = polygon.length;
-  }, [polygon]);
+  }, [polygon, drawingMode]);
 
   // Switch Tile Layer
   useEffect(() => {
@@ -612,28 +618,31 @@ export const MapView: React.FC<MapViewProps> = ({
     });
     pathGroup.addLayer(mainFlightPath);
 
-    // Draw waypoints markers (Only show major turn points and sample photo dots to avoid clustering)
+    // Draw waypoints markers (Only show major turn points and sample photo dots to avoid clustering & browser overload)
     const totalWp = waypoints.length;
-    const step = totalWp > 300 ? Math.ceil(totalWp / 150) : 1;
+    const maxVisibleMarkers = 80;
+    const step = totalWp > maxVisibleMarkers ? Math.ceil(totalWp / maxVisibleMarkers) : 1;
 
     waypoints.forEach((wp, idx) => {
       const isSelected = selectedWaypointId === wp.id;
       const isEndpoint = idx === 0 || idx === waypoints.length - 1;
+      const isTurn = wp.action === 'turn' || wp.action === 'takeoff';
 
-      if (idx % step !== 0 && !isSelected && !isEndpoint && !wp.isPhotoPoint) return;
+      // Keep DOM fast: Only render endpoint, selected, turn points, and sampled photo points
+      if (!isSelected && !isEndpoint && !isTurn && (idx % step !== 0)) return;
 
       const isPhoto = wp.isPhotoPoint;
       const color = isSelected ? '#ef4444' : isPhoto ? '#3b82f6' : '#f59e0b';
-      const size = isSelected ? 16 : isPhoto ? 10 : 12;
+      const size = isSelected ? 16 : isPhoto ? 8 : 12;
 
       const markerHtml = `
         <div style="
           width: ${size}px;
           height: ${size}px;
           background-color: ${color};
-          border: 2px solid #ffffff;
+          border: 1.5px solid #ffffff;
           border-radius: ${isPhoto ? '50%' : '3px'};
-          box-shadow: 0 0 6px rgba(0,0,0,0.7);
+          box-shadow: 0 0 5px rgba(0,0,0,0.6);
           transition: transform 0.15s ease;
           ${isSelected ? 'transform: scale(1.3);' : ''}
         "></div>
@@ -1019,14 +1028,32 @@ export const MapView: React.FC<MapViewProps> = ({
 
           {/* Informative helper badge when drawing or editing */}
           {drawingMode !== 'none' && (
-            <div className="bg-slate-900/95 backdrop-blur-md border border-cyan-500/40 rounded-xl px-3.5 py-2 text-xs text-slate-100 flex items-center gap-2.5 shadow-2xl max-w-md">
-              <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping shrink-0" />
-              <span className="leading-snug">
-                {drawingMode === 'polygon' && 'Clique no mapa para adicionar vértices ao polígono de mapeamento.'}
-                {drawingMode === 'corridor' && 'Clique no mapa para traçar o eixo linear do corredor.'}
-                {drawingMode === 'edit' && 'Arraste os vértices ciano para ajustar. Clique nos botões (+) para inserir novos pontos. Botão direito para excluir.'}
-                {drawingMode === 'takeoff' && 'Clique no local exato onde o drone decolará para obter a cota SRTM do terreno.'}
-              </span>
+            <div className="bg-slate-900/95 backdrop-blur-md border border-cyan-500/40 rounded-xl p-2.5 text-xs text-slate-100 flex items-center justify-between gap-3 shadow-2xl max-w-md">
+              <div className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping shrink-0" />
+                <span className="leading-snug">
+                  {drawingMode === 'polygon' && (polygon.length >= 3 ? `${polygon.length} vértices adicionados. Pronto!` : `Clique no mapa (${polygon.length}/3 mín)`)}
+                  {drawingMode === 'corridor' && `${polygon.length} pontos de eixo.`}
+                  {drawingMode === 'edit' && 'Arraste os vértices para ajustar ou clique no botão direito para excluir.'}
+                  {drawingMode === 'takeoff' && 'Clique para marcar o ponto de decolagem.'}
+                </span>
+              </div>
+
+              {(drawingMode === 'polygon' && polygon.length >= 3) || (drawingMode === 'corridor' && polygon.length >= 2) ? (
+                <button
+                  onClick={() => setDrawingMode('none')}
+                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 px-2.5 py-1 rounded-lg text-xs font-bold shrink-0 transition-colors shadow-md shadow-cyan-500/30"
+                >
+                  Concluir
+                </button>
+              ) : (
+                <button
+                  onClick={() => setDrawingMode('none')}
+                  className="text-slate-400 hover:text-slate-200 px-2 py-0.5 text-xs"
+                >
+                  Fechar
+                </button>
+              )}
             </div>
           )}
         </div>

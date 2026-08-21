@@ -281,21 +281,25 @@ export function generateGridFlightMission(
   flightLines: FlightLine[];
   stats: any;
 } {
-  if (polygon.length < 3) {
+  if (!polygon || polygon.length < 3) {
     return { waypoints: [], flightLines: [], stats: null };
   }
 
   const centroid = getPolygonCentroid(polygon);
+  if (!centroid || isNaN(centroid[0]) || isNaN(centroid[1])) {
+    return { waypoints: [], flightLines: [], stats: null };
+  }
+
   const localPoly = polygon.map(([lat, lng]) => toLocalMeters(lat, lng, centroid[0], centroid[1]));
 
   const photoParams = calculatePhotogrammetryParameters(
     camera,
-    config.targetAltitudeAgl,
-    config.frontalOverlap,
-    config.sideOverlap
+    Math.max(10, config.targetAltitudeAgl || 60),
+    Math.min(95, Math.max(10, config.frontalOverlap || 75)),
+    Math.min(95, Math.max(10, config.sideOverlap || 65))
   );
 
-  const angleRad = toRad(config.stripAngle);
+  const angleRad = toRad(config.stripAngle || 0);
   const cosA = Math.cos(angleRad);
   const sinA = Math.sin(angleRad);
 
@@ -311,22 +315,29 @@ export function generateGridFlightMission(
   let maxX = -Infinity;
 
   for (const [rx, ry] of rotatedPoly) {
-    minY = Math.min(minY, ry);
-    maxY = Math.max(maxY, ry);
-    minX = Math.min(minX, rx);
-    maxX = Math.max(maxX, rx);
+    if (!isNaN(rx) && !isNaN(ry)) {
+      minY = Math.min(minY, ry);
+      maxY = Math.max(maxY, ry);
+      minX = Math.min(minX, rx);
+      maxX = Math.max(maxX, rx);
+    }
   }
 
-  // Add margin
-  minY -= config.marginBufferM;
-  maxY += config.marginBufferM;
+  if (!isFinite(minY) || !isFinite(maxY) || minY >= maxY) {
+    return { waypoints: [], flightLines: [], stats: null };
+  }
+
+  const margin = Math.max(0, config.marginBufferM || 0);
+  minY -= margin;
+  maxY += margin;
 
   const rawFlightLines: { y: number; segments: [number, number][] }[] = [];
-  const lateralSpacing = photoParams.lateralSpacingM;
-  const forwardSpacing = photoParams.forwardSpacingM;
+  const lateralSpacing = Math.max(3, photoParams.lateralSpacingM || 15);
+  const forwardSpacing = Math.max(2, photoParams.forwardSpacingM || 10);
 
-  // Generate sweep lines from minY to maxY
-  const lineCount = Math.max(2, Math.ceil((maxY - minY) / lateralSpacing));
+  // Generate sweep lines from minY to maxY with safe bounds (max 120 lines to prevent CPU lock)
+  const rawLineCount = Math.ceil((maxY - minY) / lateralSpacing);
+  const lineCount = Math.min(120, Math.max(2, rawLineCount));
   const actualLateralStep = (maxY - minY) / lineCount;
 
   for (let i = 0; i <= lineCount; i++) {
@@ -335,9 +346,9 @@ export function generateGridFlightMission(
 
     // Pair intersections into valid segments inside polygon
     for (let j = 0; j < intersections.length - 1; j += 2) {
-      const x1 = intersections[j] - config.marginBufferM;
-      const x2 = intersections[j + 1] + config.marginBufferM;
-      if (x2 > x1) {
+      const x1 = intersections[j] - margin;
+      const x2 = intersections[j + 1] + margin;
+      if (x2 > x1 && isFinite(x1) && isFinite(x2)) {
         rawFlightLines.push({ y, segments: [[x1, x2]] });
       }
     }
@@ -351,9 +362,10 @@ export function generateGridFlightMission(
   let cumulativeDist = 0;
   let cumulativeTime = 0;
   let totalPhotos = 0;
+  const maxWaypointsLimit = 1200;
 
   // Include optional takeoff initial waypoint
-  if (takeoffPoint) {
+  if (takeoffPoint && !isNaN(takeoffPoint.lat) && !isNaN(takeoffPoint.lng)) {
     const utm = latLngToUtm(takeoffPoint.lat, takeoffPoint.lng);
     waypointsList.push({
       id: waypointId++,
@@ -378,6 +390,8 @@ export function generateGridFlightMission(
 
   // Generate main grid lines
   for (let lIdx = 0; lIdx < rawFlightLines.length; lIdx++) {
+    if (waypointsList.length >= maxWaypointsLimit) break;
+
     const line = rawFlightLines[lIdx];
     const segment = line.segments[0];
     if (!segment) continue;
@@ -390,10 +404,14 @@ export function generateGridFlightMission(
 
     const linePoints: [number, number][] = [];
     const segDist = Math.abs(xEnd - xStart);
-    const steps = Math.max(1, Math.ceil(segDist / forwardSpacing));
+    // Limit steps per flight line to safe number
+    const rawSteps = Math.ceil(segDist / forwardSpacing);
+    const steps = Math.min(80, Math.max(1, rawSteps));
     const stepSize = (xEnd - xStart) / steps;
 
     for (let s = 0; s <= steps; s++) {
+      if (waypointsList.length >= maxWaypointsLimit) break;
+
       const rx = xStart + s * stepSize;
       const ry = line.y;
 
@@ -402,6 +420,8 @@ export function generateGridFlightMission(
       const ly = rx * sinA + ry * cosA;
 
       const [lat, lng] = fromLocalMeters(lx, ly, centroid[0], centroid[1]);
+      if (isNaN(lat) || isNaN(lng)) continue;
+
       linePoints.push([lat, lng]);
 
       const isPhoto = s > 0 && s < steps;
@@ -424,7 +444,7 @@ export function generateGridFlightMission(
         timeToNextSec: 0,
         cumulativeTimeSec: 0,
         utm,
-        batchIndex: Math.floor((waypointId - 2) / config.maxWaypointsPerFile),
+        batchIndex: Math.floor((waypointId - 2) / (config.maxWaypointsPerFile || 200)),
         isPhotoPoint: isPhoto
       };
       waypointsList.push(wp);
@@ -440,7 +460,7 @@ export function generateGridFlightMission(
   }
 
   // If Double Grid (Cross-Grid) is requested, add 90-degree transversal lines
-  if (config.gridType === 'double') {
+  if (config.gridType === 'double' && waypointsList.length < maxWaypointsLimit) {
     const crossAngleRad = toRad((config.stripAngle + 90) % 360);
     const cosCross = Math.cos(crossAngleRad);
     const sinCross = Math.sin(crossAngleRad);
@@ -453,76 +473,92 @@ export function generateGridFlightMission(
     let minCrossY = Infinity;
     let maxCrossY = -Infinity;
     for (const [rx, ry] of crossRotPoly) {
-      minCrossY = Math.min(minCrossY, ry);
-      maxCrossY = Math.max(maxCrossY, ry);
+      if (!isNaN(rx) && !isNaN(ry)) {
+        minCrossY = Math.min(minCrossY, ry);
+        maxCrossY = Math.max(maxCrossY, ry);
+      }
     }
 
-    minCrossY -= config.marginBufferM;
-    maxCrossY += config.marginBufferM;
+    if (isFinite(minCrossY) && isFinite(maxCrossY) && minCrossY < maxCrossY) {
+      minCrossY -= margin;
+      maxCrossY += margin;
 
-    const crossLinesCount = Math.max(2, Math.ceil((maxCrossY - minCrossY) / lateralSpacing));
-    const crossStep = (maxCrossY - minCrossY) / crossLinesCount;
+      const rawCrossLinesCount = Math.ceil((maxCrossY - minCrossY) / lateralSpacing);
+      const crossLinesCount = Math.min(80, Math.max(2, rawCrossLinesCount));
+      const crossStep = (maxCrossY - minCrossY) / crossLinesCount;
 
-    for (let i = 0; i <= crossLinesCount; i++) {
-      const y = minCrossY + i * crossStep;
-      const intersections = findLinePolygonIntersections(y, crossRotPoly);
+      for (let i = 0; i <= crossLinesCount; i++) {
+        if (waypointsList.length >= maxWaypointsLimit) break;
 
-      for (let j = 0; j < intersections.length - 1; j += 2) {
-        let x1 = intersections[j] - config.marginBufferM;
-        let x2 = intersections[j + 1] + config.marginBufferM;
+        const y = minCrossY + i * crossStep;
+        const intersections = findLinePolygonIntersections(y, crossRotPoly);
 
-        if (isReversed) {
-          [x1, x2] = [x2, x1];
-        }
-        isReversed = !isReversed;
+        for (let j = 0; j < intersections.length - 1; j += 2) {
+          if (waypointsList.length >= maxWaypointsLimit) break;
 
-        const linePoints: [number, number][] = [];
-        const segDist = Math.abs(x2 - x1);
-        const steps = Math.max(1, Math.ceil(segDist / forwardSpacing));
-        const stepSize = (x2 - x1) / steps;
+          let x1 = intersections[j] - margin;
+          let x2 = intersections[j + 1] + margin;
 
-        for (let s = 0; s <= steps; s++) {
-          const rx = x1 + s * stepSize;
-          const ry = y;
+          if (x2 <= x1 || !isFinite(x1) || !isFinite(x2)) continue;
 
-          const lx = rx * cosCross - ry * sinCross;
-          const ly = rx * sinCross + ry * cosCross;
+          if (isReversed) {
+            [x1, x2] = [x2, x1];
+          }
+          isReversed = !isReversed;
 
-          const [lat, lng] = fromLocalMeters(lx, ly, centroid[0], centroid[1]);
-          linePoints.push([lat, lng]);
+          const linePoints: [number, number][] = [];
+          const segDist = Math.abs(x2 - x1);
+          const rawSteps = Math.ceil(segDist / forwardSpacing);
+          const steps = Math.min(60, Math.max(1, rawSteps));
+          const stepSize = (x2 - x1) / steps;
 
-          const isPhoto = s > 0 && s < steps;
-          if (isPhoto) totalPhotos++;
+          for (let s = 0; s <= steps; s++) {
+            if (waypointsList.length >= maxWaypointsLimit) break;
 
-          const utm = latLngToUtm(lat, lng);
-          const wp: Waypoint = {
-            id: waypointId++,
-            lat,
-            lng,
-            altitudeAgl: config.targetAltitudeAgl,
-            altitudeMsl: config.targetAltitudeAgl,
-            groundElevation: 0,
-            speedMs: config.flightSpeedMs,
-            action: isPhoto ? 'photo' : 'turn',
-            headingDeg: 0,
-            gimbalPitchDeg: config.gimbalPitchDeg,
-            distanceToNextM: 0,
-            cumulativeDistanceM: 0,
-            timeToNextSec: 0,
-            cumulativeTimeSec: 0,
-            utm,
-            batchIndex: Math.floor((waypointId - 2) / config.maxWaypointsPerFile),
-            isPhotoPoint: isPhoto
-          };
-          waypointsList.push(wp);
-        }
+            const rx = x1 + s * stepSize;
+            const ry = y;
 
-        if (linePoints.length > 0) {
-          flightLinesList.push({
-            id: flightLinesList.length + 1,
-            points: linePoints,
-            lengthM: segDist
-          });
+            const lx = rx * cosCross - ry * sinCross;
+            const ly = rx * sinCross + ry * cosCross;
+
+            const [lat, lng] = fromLocalMeters(lx, ly, centroid[0], centroid[1]);
+            if (isNaN(lat) || isNaN(lng)) continue;
+
+            linePoints.push([lat, lng]);
+
+            const isPhoto = s > 0 && s < steps;
+            if (isPhoto) totalPhotos++;
+
+            const utm = latLngToUtm(lat, lng);
+            const wp: Waypoint = {
+              id: waypointId++,
+              lat,
+              lng,
+              altitudeAgl: config.targetAltitudeAgl,
+              altitudeMsl: config.targetAltitudeAgl,
+              groundElevation: 0,
+              speedMs: config.flightSpeedMs,
+              action: isPhoto ? 'photo' : 'turn',
+              headingDeg: 0,
+              gimbalPitchDeg: config.gimbalPitchDeg,
+              distanceToNextM: 0,
+              cumulativeDistanceM: 0,
+              timeToNextSec: 0,
+              cumulativeTimeSec: 0,
+              utm,
+              batchIndex: Math.floor((waypointId - 2) / (config.maxWaypointsPerFile || 200)),
+              isPhotoPoint: isPhoto
+            };
+            waypointsList.push(wp);
+          }
+
+          if (linePoints.length > 0) {
+            flightLinesList.push({
+              id: flightLinesList.length + 1,
+              points: linePoints,
+              lengthM: segDist
+            });
+          }
         }
       }
     }
