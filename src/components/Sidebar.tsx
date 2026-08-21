@@ -43,11 +43,7 @@ import {
   Globe,
   HelpCircle,
   FolderOpen,
-  Edit3,
-  Undo2,
-  ArrowLeftRight,
   Trash2,
-  Plus,
   Spline,
   Pencil
 } from 'lucide-react';
@@ -60,8 +56,8 @@ interface SidebarProps {
   stats: MissionStats | null;
   polygon: [number, number][];
   setPolygon?: (poly: [number, number][]) => void;
-  drawingMode?: 'none' | 'polygon' | 'corridor' | 'takeoff' | 'edit';
-  setDrawingMode?: (mode: 'none' | 'polygon' | 'corridor' | 'takeoff' | 'edit') => void;
+  drawingMode?: 'none' | 'polygon' | 'corridor' | 'takeoff';
+  setDrawingMode?: (mode: 'none' | 'polygon' | 'corridor' | 'takeoff') => void;
   waypoints: Waypoint[];
   takeoffPoint?: TakeoffPoint;
   elevationProfile: ElevationPoint[];
@@ -360,130 +356,61 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             </div>
 
-            {/* Geometry & Shape Editing Controls */}
+            {/* Area de Voo & Desenho */}
             <div className="bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800 flex flex-col gap-2.5">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Edit3 className="w-4 h-4 text-cyan-400" />
-                  <span className="text-xs font-bold text-slate-200">
-                    Geometria & Edição do Traçado
-                  </span>
-                </div>
+                <span className="text-xs font-bold text-slate-200">Área de Voo & Desenho</span>
                 {polygon.length > 0 && (
                   <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-cyan-950 border border-cyan-800 text-cyan-300">
-                    {polygon.length} {polygon.length === 1 ? 'vértice' : 'vértices'}
+                    {polygon.length} {polygon.length === 1 ? 'ponto' : 'pontos'}
                   </span>
                 )}
               </div>
 
-              {polygon.length > 0 ? (
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between text-[11px] text-slate-400 bg-slate-900/80 px-2.5 py-1.5 rounded-xl border border-slate-800/80">
-                    <span>Tipo: <strong className="text-slate-200">{config.gridType === 'corridor' ? 'Corredor' : 'Polígono'}</strong></span>
-                    {stats && (
-                      <span>Área: <strong className="text-cyan-400 font-mono">{(stats.totalAreaHa ?? (stats.totalAreaM2 ? stats.totalAreaM2 / 10000 : 0)).toFixed(2)} ha</strong></span>
-                    )}
-                  </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  onClick={() => setDrawingMode?.(drawingMode === 'polygon' ? 'none' : 'polygon')}
+                  className={`py-2 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                    drawingMode === 'polygon'
+                      ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/30'
+                      : 'bg-slate-900 text-slate-200 border border-slate-800 hover:bg-slate-800'
+                  }`}
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  <span>{drawingMode === 'polygon' ? 'Desenhando...' : 'Desenhar Polígono'}</span>
+                </button>
 
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      onClick={() => setDrawingMode?.(drawingMode === 'edit' ? 'none' : 'edit')}
-                      className={`py-2 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
-                        drawingMode === 'edit'
-                          ? 'bg-cyan-400 text-slate-950 shadow-md shadow-cyan-400/30'
-                          : 'bg-cyan-950/40 text-cyan-300 border border-cyan-800/60 hover:bg-cyan-900/50'
-                      }`}
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      <span>{drawingMode === 'edit' ? 'Concluir Edição' : 'Editar no Mapa'}</span>
-                    </button>
+                <button
+                  onClick={() => {
+                    setConfig((prev) => ({ ...prev, gridType: 'corridor' }));
+                    setDrawingMode?.(drawingMode === 'corridor' ? 'none' : 'corridor');
+                  }}
+                  className={`py-2 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                    drawingMode === 'corridor'
+                      ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/30'
+                      : 'bg-slate-900 text-slate-200 border border-slate-800 hover:bg-slate-800'
+                  }`}
+                >
+                  <Spline className="w-3.5 h-3.5" />
+                  <span>{drawingMode === 'corridor' ? 'Desenhando...' : 'Desenhar Corredor'}</span>
+                </button>
+              </div>
 
-                    <button
-                      onClick={() => setDrawingMode?.(config.gridType === 'corridor' ? 'corridor' : 'polygon')}
-                      className={`py-2 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
-                        drawingMode === 'polygon' || drawingMode === 'corridor'
-                          ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/30'
-                          : 'bg-slate-900 text-slate-200 border border-slate-800 hover:bg-slate-800'
-                      }`}
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>+ Ponto</span>
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-1.5 pt-0.5">
-                    <button
-                      onClick={() => {
-                        if (polygon.length > 0) {
-                          setPolygon?.(polygon.slice(0, -1));
-                        }
-                      }}
-                      className="py-1.5 px-2 rounded-xl text-[11px] font-semibold bg-slate-900 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-800 flex items-center justify-center gap-1 transition-colors"
-                      title="Desfazer o último vértice adicionado"
-                    >
-                      <Undo2 className="w-3 h-3" />
-                      <span>Desfazer</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        if (polygon.length > 1) {
-                          setPolygon?.([...polygon].reverse());
-                        }
-                      }}
-                      className="py-1.5 px-2 rounded-xl text-[11px] font-semibold bg-slate-900 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-800 flex items-center justify-center gap-1 transition-colors"
-                      title="Inverter ordem dos pontos"
-                    >
-                      <ArrowLeftRight className="w-3 h-3" />
-                      <span>Inverter</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setPolygon?.([]);
-                        setDrawingMode?.('none');
-                      }}
-                      className="py-1.5 px-2 rounded-xl text-[11px] font-semibold bg-rose-950/40 text-rose-300 hover:bg-rose-900/50 border border-rose-800/50 flex items-center justify-center gap-1 transition-colors"
-                      title="Limpar área desenhada"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      <span>Limpar</span>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Nenhuma área definida. Clique para iniciar o desenho ou importe um arquivo KML/KMZ.
-                  </p>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      onClick={() => setDrawingMode?.('polygon')}
-                      className={`py-2 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
-                        drawingMode === 'polygon'
-                          ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/30'
-                          : 'bg-slate-900 text-slate-200 border border-slate-800 hover:bg-slate-800'
-                      }`}
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                      <span>Desenhar Polígono</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setConfig((prev) => ({ ...prev, gridType: 'corridor' }));
-                        setDrawingMode?.('corridor');
-                      }}
-                      className={`py-2 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
-                        drawingMode === 'corridor'
-                          ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/30'
-                          : 'bg-slate-900 text-slate-200 border border-slate-800 hover:bg-slate-800'
-                      }`}
-                    >
-                      <Spline className="w-3.5 h-3.5" />
-                      <span>Desenhar Corredor</span>
-                    </button>
-                  </div>
+              {polygon.length > 0 && (
+                <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
+                  <span className="text-[11px] text-slate-400">
+                    Área: <strong className="text-cyan-400 font-mono">{(stats?.totalAreaHa ?? 0).toFixed(2)} ha</strong>
+                  </span>
+                  <button
+                    onClick={() => {
+                      setPolygon?.([]);
+                      setDrawingMode?.('none');
+                    }}
+                    className="text-[11px] text-rose-400 hover:text-rose-300 flex items-center gap-1 hover:underline"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Limpar Área</span>
+                  </button>
                 </div>
               )}
             </div>
