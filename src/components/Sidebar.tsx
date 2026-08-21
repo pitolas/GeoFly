@@ -42,7 +42,14 @@ import {
   CheckCircle,
   Globe,
   HelpCircle,
-  FolderOpen
+  FolderOpen,
+  Edit3,
+  Undo2,
+  ArrowLeftRight,
+  Trash2,
+  Plus,
+  Spline,
+  Pencil
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -52,6 +59,9 @@ interface SidebarProps {
   setSelectedDrone: (drone: DroneCameraProfile) => void;
   stats: MissionStats | null;
   polygon: [number, number][];
+  setPolygon?: (poly: [number, number][]) => void;
+  drawingMode?: 'none' | 'polygon' | 'corridor' | 'takeoff' | 'edit';
+  setDrawingMode?: (mode: 'none' | 'polygon' | 'corridor' | 'takeoff' | 'edit') => void;
   waypoints: Waypoint[];
   takeoffPoint?: TakeoffPoint;
   elevationProfile: ElevationPoint[];
@@ -79,6 +89,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setSelectedDrone,
   stats,
   polygon,
+  setPolygon,
+  drawingMode,
+  setDrawingMode,
   waypoints,
   takeoffPoint,
   elevationProfile,
@@ -345,6 +358,134 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Geometry & Shape Editing Controls */}
+            <div className="bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800 flex flex-col gap-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Edit3 className="w-4 h-4 text-cyan-400" />
+                  <span className="text-xs font-bold text-slate-200">
+                    Geometria & Edição do Traçado
+                  </span>
+                </div>
+                {polygon.length > 0 && (
+                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-cyan-950 border border-cyan-800 text-cyan-300">
+                    {polygon.length} {polygon.length === 1 ? 'vértice' : 'vértices'}
+                  </span>
+                )}
+              </div>
+
+              {polygon.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 bg-slate-900/80 px-2.5 py-1.5 rounded-xl border border-slate-800/80">
+                    <span>Tipo: <strong className="text-slate-200">{config.gridType === 'corridor' ? 'Corredor' : 'Polígono'}</strong></span>
+                    {stats && (
+                      <span>Área: <strong className="text-cyan-400 font-mono">{stats.areaHectares.toFixed(2)} ha</strong></span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      onClick={() => setDrawingMode?.(drawingMode === 'edit' ? 'none' : 'edit')}
+                      className={`py-2 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                        drawingMode === 'edit'
+                          ? 'bg-cyan-400 text-slate-950 shadow-md shadow-cyan-400/30'
+                          : 'bg-cyan-950/40 text-cyan-300 border border-cyan-800/60 hover:bg-cyan-900/50'
+                      }`}
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>{drawingMode === 'edit' ? 'Concluir Edição' : 'Editar no Mapa'}</span>
+                    </button>
+
+                    <button
+                      onClick={() => setDrawingMode?.(config.gridType === 'corridor' ? 'corridor' : 'polygon')}
+                      className={`py-2 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                        drawingMode === 'polygon' || drawingMode === 'corridor'
+                          ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/30'
+                          : 'bg-slate-900 text-slate-200 border border-slate-800 hover:bg-slate-800'
+                      }`}
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Ponto</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+                    <button
+                      onClick={() => {
+                        if (polygon.length > 0) {
+                          setPolygon?.(polygon.slice(0, -1));
+                        }
+                      }}
+                      className="py-1.5 px-2 rounded-xl text-[11px] font-semibold bg-slate-900 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-800 flex items-center justify-center gap-1 transition-colors"
+                      title="Desfazer o último vértice adicionado"
+                    >
+                      <Undo2 className="w-3 h-3" />
+                      <span>Desfazer</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        if (polygon.length > 1) {
+                          setPolygon?.([...polygon].reverse());
+                        }
+                      }}
+                      className="py-1.5 px-2 rounded-xl text-[11px] font-semibold bg-slate-900 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-800 flex items-center justify-center gap-1 transition-colors"
+                      title="Inverter ordem dos pontos"
+                    >
+                      <ArrowLeftRight className="w-3 h-3" />
+                      <span>Inverter</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setPolygon?.([]);
+                        setDrawingMode?.('none');
+                      }}
+                      className="py-1.5 px-2 rounded-xl text-[11px] font-semibold bg-rose-950/40 text-rose-300 hover:bg-rose-900/50 border border-rose-800/50 flex items-center justify-center gap-1 transition-colors"
+                      title="Limpar área desenhada"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Limpar</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Nenhuma área definida. Clique para iniciar o desenho ou importe um arquivo KML/KMZ.
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      onClick={() => setDrawingMode?.('polygon')}
+                      className={`py-2 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                        drawingMode === 'polygon'
+                          ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/30'
+                          : 'bg-slate-900 text-slate-200 border border-slate-800 hover:bg-slate-800'
+                      }`}
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      <span>Desenhar Polígono</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setConfig((prev) => ({ ...prev, gridType: 'corridor' }));
+                        setDrawingMode?.('corridor');
+                      }}
+                      className={`py-2 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                        drawingMode === 'corridor'
+                          ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/30'
+                          : 'bg-slate-900 text-slate-200 border border-slate-800 hover:bg-slate-800'
+                      }`}
+                    >
+                      <Spline className="w-3.5 h-3.5" />
+                      <span>Desenhar Corredor</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Corridor Width (if Corridor mode) */}
@@ -750,16 +891,41 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
 
             {/* Step by step guide for loading into DJI */}
-            <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800 flex flex-col gap-2 mt-1">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                <HelpCircle className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Como transferir para o DJI Fly / RC:</span>
+            <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 flex flex-col gap-2.5 mt-1">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-200 flex items-center gap-1.5">
+                <HelpCircle className="w-4 h-4 text-cyan-400" />
+                <span>Como importar o KMZ no DJI Fly / DJI RC:</span>
               </span>
-              <ol className="text-xs text-slate-400 list-decimal list-inside flex flex-col gap-1 leading-relaxed">
-                <li>Baixe o arquivo <b>.KMZ</b> gerado no GeoFly.</li>
-                <li>No Android ou DJI RC, copie o arquivo para a pasta: <br/><code className="text-[10px] text-cyan-300 bg-slate-900 px-1 py-0.5 rounded">DJI/dji.go.v5/DJI FLY/waypoint</code></li>
-                <li>Abra o aplicativo DJI Fly, vá em Waypoints e carregue a rota importada.</li>
-              </ol>
+              
+              <div className="text-xs text-slate-300 flex flex-col gap-2 leading-relaxed">
+                <div className="flex items-start gap-2">
+                  <span className="bg-cyan-950 text-cyan-400 font-bold px-1.5 py-0.5 rounded text-[10px] border border-cyan-800 shrink-0">1</span>
+                  <span>Baixe o arquivo <b>.KMZ</b> oficial WPML clicando no botão acima.</span>
+                </div>
+                
+                <div className="flex items-start gap-2">
+                  <span className="bg-cyan-950 text-cyan-400 font-bold px-1.5 py-0.5 rounded text-[10px] border border-cyan-800 shrink-0">2</span>
+                  <span>Conecte o seu controle (DJI RC, DJI RC 2, DJI RC Pro) ou celular ao computador via cabo USB-C (ou use cartão MicroSD).</span>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <span className="bg-cyan-950 text-cyan-400 font-bold px-1.5 py-0.5 rounded text-[10px] border border-cyan-800 shrink-0">3</span>
+                  <div>
+                    <span>Copie o arquivo <b>.kmz</b> para o diretório de trajetórias do DJI Fly:</span>
+                    <div className="mt-1 bg-slate-900/90 p-2 rounded-xl font-mono text-[10px] text-cyan-300 border border-slate-800 select-all">
+                      Android/data/dji.go.v5/files/waypoint
+                    </div>
+                    <span className="text-[10px] text-slate-400 block mt-1">
+                      (Dica: se estiver no DJI Fly versão recente, você também pode abrir o menu <b>Trajetória (Waypoints) &gt; Biblioteca &gt; Importar KMZ</b>).
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <span className="bg-cyan-950 text-cyan-400 font-bold px-1.5 py-0.5 rounded text-[10px] border border-cyan-800 shrink-0">4</span>
+                  <span>Abra o <b>DJI Fly</b>, ligue o drone, selecione a missão na biblioteca de Waypoints e inicie o voo com segurança!</span>
+                </div>
+              </div>
             </div>
           </div>
         )}

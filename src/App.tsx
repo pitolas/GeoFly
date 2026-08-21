@@ -45,7 +45,7 @@ export default function App() {
   const [isRecalculatingTerrain, setIsRecalculatingTerrain] = useState<boolean>(false);
 
   // Map drawing state
-  const [drawingMode, setDrawingMode] = useState<'none' | 'polygon' | 'corridor' | 'takeoff'>('none');
+  const [drawingMode, setDrawingMode] = useState<'none' | 'polygon' | 'corridor' | 'takeoff' | 'edit'>('none');
   const [selectedWaypointId, setSelectedWaypointId] = useState<number | null>(null);
 
   // Modals & Simulation
@@ -260,6 +260,9 @@ export default function App() {
           setSelectedDrone={setSelectedDrone}
           stats={stats}
           polygon={polygon}
+          setPolygon={setPolygon}
+          drawingMode={drawingMode}
+          setDrawingMode={setDrawingMode}
           waypoints={waypoints}
           takeoffPoint={takeoffPoint}
           elevationProfile={elevationProfile}

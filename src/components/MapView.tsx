@@ -20,7 +20,11 @@ import {
   Loader2,
   X,
   Building2,
-  MapPinCheck
+  MapPinCheck,
+  Edit3,
+  Undo2,
+  ArrowLeftRight,
+  Plus
 } from 'lucide-react';
 
 // Fix default Leaflet icon paths
@@ -55,8 +59,8 @@ interface MapViewProps {
   isSimulating: boolean;
   simDronePosition?: SimDronePosition | null;
   gridType: 'single' | 'double' | 'corridor' | 'perimeter';
-  drawingMode: 'none' | 'polygon' | 'corridor' | 'takeoff';
-  setDrawingMode: (mode: 'none' | 'polygon' | 'corridor' | 'takeoff') => void;
+  drawingMode: 'none' | 'polygon' | 'corridor' | 'takeoff' | 'edit';
+  setDrawingMode: (mode: 'none' | 'polygon' | 'corridor' | 'takeoff' | 'edit') => void;
 }
 
 export const MapView: React.FC<MapViewProps> = ({
@@ -381,7 +385,7 @@ export const MapView: React.FC<MapViewProps> = ({
     };
   }, [drawingMode, polygon, setPolygon, setTakeoffPoint, setDrawingMode]);
 
-  // Render Polygon and Vertices
+  // Render Polygon, Corridors, Draggable Vertices & Midpoint Insertion Handles
   useEffect(() => {
     if (!polygonLayerGroupRef.current || !mapRef.current) return;
     const group = polygonLayerGroupRef.current;
@@ -389,65 +393,201 @@ export const MapView: React.FC<MapViewProps> = ({
 
     if (polygon.length === 0) return;
 
-    if (gridType === 'corridor') {
-      // Render as thick corridor polyline with dashed vertices
-      const polyline = L.polyline(polygon, {
+    // Track active coordinates locally for real-time smooth dragging
+    const currentCoords: [number, number][] = polygon.map((pt) => [pt[0], pt[1]]);
+
+    const isCorridor = gridType === 'corridor';
+    const isClosedPolygon = !isCorridor && polygon.length >= 3;
+
+    // 1. Render Main Boundary Layer (Polygon or Polyline)
+    let shapeLayer: any;
+    if (isCorridor) {
+      shapeLayer = L.polyline(polygon, {
         color: '#06b6d4',
         weight: 4,
         dashArray: '8, 8',
-        opacity: 0.9
+        opacity: 0.95
       });
-      group.addLayer(polyline);
-    } else if (polygon.length >= 3) {
-      // Render as closed polygon
-      const poly = L.polygon(polygon, {
+    } else if (isClosedPolygon) {
+      shapeLayer = L.polygon(polygon, {
         color: '#06b6d4',
         weight: 2.5,
         fillColor: '#0891b2',
         fillOpacity: 0.18,
         dashArray: '6, 6'
       });
-      group.addLayer(poly);
-    } else if (polygon.length === 2) {
-      const line = L.polyline(polygon, {
+    } else {
+      shapeLayer = L.polyline(polygon, {
         color: '#06b6d4',
         weight: 2.5,
-        dashArray: '6, 6'
+        dashArray: '6, 6',
+        opacity: 0.9
       });
-      group.addLayer(line);
     }
+    group.addLayer(shapeLayer);
 
-    // Render draggable vertex handles
+    const midpointMarkers: L.Marker[] = [];
+
+    // Helper to refresh midpoint positions when dragging any vertex
+    const refreshMidpoints = () => {
+      const segs = isClosedPolygon ? currentCoords.length : currentCoords.length - 1;
+      midpointMarkers.forEach((mMarker, sIdx) => {
+        if (sIdx < segs) {
+          const nextIdx = (sIdx + 1) % currentCoords.length;
+          const pA = currentCoords[sIdx];
+          const pB = currentCoords[nextIdx];
+          if (pA && pB) {
+            mMarker.setLatLng([(pA[0] + pB[0]) / 2, (pA[1] + pB[1]) / 2]);
+          }
+        }
+      });
+    };
+
+    // 2. Render Draggable Primary Vertex Handles
     polygon.forEach((pt, idx) => {
+      const isStart = idx === 0;
+      const isEnd = idx === polygon.length - 1;
+      const badgeBg = isStart ? '#10b981' : isEnd && isCorridor ? '#f59e0b' : '#06b6d4';
+
+      const vertexIconHtml = `
+        <div style="
+          width: 22px;
+          height: 22px;
+          background: ${badgeBg};
+          border: 2.5px solid #ffffff;
+          border-radius: 50%;
+          box-shadow: 0 0 10px rgba(6,182,212,0.8), 0 2px 5px rgba(0,0,0,0.6);
+          cursor: grab;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #ffffff;
+          font-family: monospace;
+          font-size: 10px;
+          font-weight: 900;
+          transition: transform 0.1s ease;
+          user-select: none;
+        " onmouseover="this.style.transform='scale(1.25)';" onmouseout="this.style.transform='scale(1)';">
+          ${idx + 1}
+        </div>
+      `;
+
       const vertexIcon = L.divIcon({
-        className: 'custom-vertex-marker',
-        html: `<div style="width: 14px; height: 14px; background: #06b6d4; border: 2px solid #ffffff; border-radius: 50%; box-shadow: 0 0 6px rgba(0,0,0,0.6); cursor: grab;"></div>`,
-        iconSize: [14, 14],
-        iconAnchor: [7, 7]
+        className: 'custom-vertex-handle',
+        html: vertexIconHtml,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11]
       });
 
       const marker = L.marker(pt, {
         icon: vertexIcon,
-        draggable: true
+        draggable: true,
+        zIndexOffset: 1200
       });
 
+      // Smooth live dragging without triggering full React re-render until released
       marker.on('drag', (e: any) => {
         const newLatLng = e.target.getLatLng();
-        const updated = [...polygon];
-        updated[idx] = [newLatLng.lat, newLatLng.lng];
-        setPolygon(updated);
+        currentCoords[idx] = [newLatLng.lat, newLatLng.lng];
+        shapeLayer.setLatLngs(currentCoords);
+        refreshMidpoints();
       });
 
-      // Right click or double click to remove vertex
-      marker.on('contextmenu', () => {
-        if (polygon.length > 1) {
+      // Commit changes to state on dragend
+      marker.on('dragend', () => {
+        setPolygon([...currentCoords]);
+      });
+
+      // Contextmenu (Right click) or Double Click to remove vertex
+      const handleRemoveVertex = (e: L.LeafletMouseEvent) => {
+        L.DomEvent.stopPropagation(e);
+        const minPoints = isCorridor ? 2 : 3;
+        if (polygon.length > minPoints) {
           const updated = polygon.filter((_, i) => i !== idx);
           setPolygon(updated);
         }
-      });
+      };
+
+      marker.on('contextmenu', handleRemoveVertex);
+      marker.on('dblclick', handleRemoveVertex);
+
+      marker.bindTooltip(
+        `<div style="font-family: sans-serif; font-size: 11px;">
+          <b>Vértice #${idx + 1} ${isStart ? '(Início)' : isEnd && isCorridor ? '(Fim)' : ''}</b><br/>
+          <span style="font-family: monospace; font-size: 10px; color: #94a3b8;">
+            Lat: ${pt[0].toFixed(6)} | Lng: ${pt[1].toFixed(6)}
+          </span><br/>
+          <span style="color: #38bdf8; font-size: 10px; font-weight: bold;">
+            🖱️ Arraste para mover | Botão direito para excluir
+          </span>
+        </div>`,
+        { direction: 'top', offset: [0, -12], className: 'custom-leaflet-tooltip' }
+      );
 
       group.addLayer(marker);
     });
+
+    // 3. Render Midpoint Insertion Handles ("+") for adding intermediate vertices
+    const segmentCount = isClosedPolygon ? polygon.length : polygon.length - 1;
+
+    for (let i = 0; i < segmentCount; i++) {
+      const nextIdx = (i + 1) % polygon.length;
+      const pA = polygon[i];
+      const pB = polygon[nextIdx];
+      const midLat = (pA[0] + pB[0]) / 2;
+      const midLng = (pA[1] + pB[1]) / 2;
+
+      const midHtml = `
+        <div style="
+          width: 16px;
+          height: 16px;
+          background: rgba(14, 165, 233, 0.85);
+          border: 1.5px solid #ffffff;
+          border-radius: 50%;
+          box-shadow: 0 0 6px rgba(0,0,0,0.5);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #ffffff;
+          font-size: 11px;
+          font-weight: 900;
+          line-height: 1;
+          transition: transform 0.15s ease, background 0.15s;
+          user-select: none;
+        " onmouseover="this.style.transform='scale(1.35)';this.style.background='#06b6d4';" onmouseout="this.style.transform='scale(1)';this.style.background='rgba(14, 165, 233, 0.85)';">
+          +
+        </div>
+      `;
+
+      const midIcon = L.divIcon({
+        className: 'custom-midpoint-handle',
+        html: midHtml,
+        iconSize: [16, 16],
+        iconAnchor: [8, 8]
+      });
+
+      const midMarker = L.marker([midLat, midLng], {
+        icon: midIcon,
+        zIndexOffset: 900
+      });
+
+      midMarker.bindTooltip(
+        '<b style="color: #38bdf8;">➕ Clique para inserir novo vértice aqui</b>',
+        { direction: 'top', offset: [0, -9], className: 'custom-leaflet-tooltip' }
+      );
+
+      // Insert new vertex when clicking on midpoint
+      midMarker.on('click', (e: L.LeafletMouseEvent) => {
+        L.DomEvent.stopPropagation(e);
+        const newCoords = [...polygon];
+        newCoords.splice(i + 1, 0, [midLat, midLng]);
+        setPolygon(newCoords);
+      });
+
+      group.addLayer(midMarker);
+      midpointMarkers.push(midMarker);
+    }
   }, [polygon, gridType, setPolygon]);
 
   // Render Flight Lines and Waypoints
@@ -775,16 +915,16 @@ export const MapView: React.FC<MapViewProps> = ({
         
         {/* Top Left: Drawing Controls Bar */}
         <div className="flex flex-col gap-2 pointer-events-auto shrink-0">
-          <div className="bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-xl p-1.5 shadow-2xl flex items-center gap-1.5">
+          <div className="bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-xl p-1.5 shadow-2xl flex items-center gap-1.5 flex-wrap">
             <button
               id="btn-draw-polygon"
               onClick={() => setDrawingMode(drawingMode === 'polygon' ? 'none' : 'polygon')}
               className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
                 drawingMode === 'polygon'
-                  ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/30'
+                  ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/30 font-bold'
                   : 'text-slate-200 hover:bg-slate-800'
               }`}
-              title="Clique no mapa para adicionar vértices do polígono"
+              title="Clique no mapa para adicionar novos vértices do polígono"
             >
               <Pencil className="w-3.5 h-3.5" />
               <span>Polígono</span>
@@ -795,7 +935,7 @@ export const MapView: React.FC<MapViewProps> = ({
               onClick={() => setDrawingMode(drawingMode === 'corridor' ? 'none' : 'corridor')}
               className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
                 drawingMode === 'corridor'
-                  ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/30'
+                  ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/30 font-bold'
                   : 'text-slate-200 hover:bg-slate-800'
               }`}
               title="Clique no mapa para criar traçado de corredor linear"
@@ -804,18 +944,62 @@ export const MapView: React.FC<MapViewProps> = ({
               <span>Corredor</span>
             </button>
 
+            {polygon.length > 0 && (
+              <>
+                <button
+                  id="btn-edit-vertices"
+                  onClick={() => setDrawingMode(drawingMode === 'edit' ? 'none' : 'edit')}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                    drawingMode === 'edit'
+                      ? 'bg-cyan-400 text-slate-950 shadow-lg shadow-cyan-400/40 ring-2 ring-cyan-300 font-bold'
+                      : 'text-cyan-400 bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-800/60'
+                  }`}
+                  title="Ajustar vértices existentes e inserir novos pontos (+)"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Editar Traçado</span>
+                </button>
+
+                <button
+                  id="btn-undo-vertex"
+                  onClick={() => {
+                    if (polygon.length > 0) {
+                      setPolygon(polygon.slice(0, -1));
+                    }
+                  }}
+                  className="p-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+                  title="Desfazer último vértice adicionado"
+                >
+                  <Undo2 className="w-4 h-4" />
+                </button>
+
+                <button
+                  id="btn-invert-direction"
+                  onClick={() => {
+                    if (polygon.length > 1) {
+                      setPolygon([...polygon].reverse());
+                    }
+                  }}
+                  className="p-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+                  title="Inverter sentido / ordem dos vértices"
+                >
+                  <ArrowLeftRight className="w-4 h-4" />
+                </button>
+              </>
+            )}
+
             <button
               id="btn-set-takeoff"
               onClick={() => setDrawingMode(drawingMode === 'takeoff' ? 'none' : 'takeoff')}
               className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
                 drawingMode === 'takeoff'
-                  ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/30'
+                  ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/30 font-bold'
                   : 'text-slate-200 hover:bg-slate-800'
               }`}
               title="Clique no mapa para definir o ponto de decolagem (Home Point)"
             >
               <MapPin className="w-3.5 h-3.5" />
-              <span>Decolagem (Home)</span>
+              <span>Decolagem</span>
             </button>
 
             {polygon.length > 0 && (
@@ -825,7 +1009,7 @@ export const MapView: React.FC<MapViewProps> = ({
                   setPolygon([]);
                   setDrawingMode('none');
                 }}
-                className="p-2 rounded-lg text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 transition-colors ml-1"
+                className="p-2 rounded-lg text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 transition-colors ml-0.5"
                 title="Limpar área desenhada"
               >
                 <Trash2 className="w-4 h-4" />
@@ -833,14 +1017,15 @@ export const MapView: React.FC<MapViewProps> = ({
             )}
           </div>
 
-          {/* Informative helper badge when drawing */}
+          {/* Informative helper badge when drawing or editing */}
           {drawingMode !== 'none' && (
-            <div className="bg-cyan-950/90 backdrop-blur-md border border-cyan-700/50 rounded-lg px-3 py-2 text-xs text-cyan-200 flex items-center gap-2 shadow-lg animate-pulse max-w-sm">
-              <Info className="w-4 h-4 text-cyan-400 shrink-0" />
-              <span>
-                {drawingMode === 'polygon' && 'Clique no mapa para adicionar os pontos da área.'}
-                {drawingMode === 'corridor' && 'Clique no mapa ao longo da rodovia/canal/linha.'}
-                {drawingMode === 'takeoff' && 'Clique onde o drone irá decolar para registrar a cota de referência.'}
+            <div className="bg-slate-900/95 backdrop-blur-md border border-cyan-500/40 rounded-xl px-3.5 py-2 text-xs text-slate-100 flex items-center gap-2.5 shadow-2xl max-w-md">
+              <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping shrink-0" />
+              <span className="leading-snug">
+                {drawingMode === 'polygon' && 'Clique no mapa para adicionar vértices ao polígono de mapeamento.'}
+                {drawingMode === 'corridor' && 'Clique no mapa para traçar o eixo linear do corredor.'}
+                {drawingMode === 'edit' && 'Arraste os vértices ciano para ajustar. Clique nos botões (+) para inserir novos pontos. Botão direito para excluir.'}
+                {drawingMode === 'takeoff' && 'Clique no local exato onde o drone decolará para obter a cota SRTM do terreno.'}
               </span>
             </div>
           )}
