@@ -7,7 +7,8 @@ import {
   TakeoffPoint,
   ElevationPoint,
   GridType,
-  SimDronePosition
+  SimDronePosition,
+  DrawingMode
 } from '../types';
 import { DRONE_PROFILES } from '../constants/drones';
 import { SAMPLE_MISSIONS } from '../constants/sampleMissions';
@@ -42,7 +43,10 @@ import {
   CheckCircle,
   Globe,
   HelpCircle,
-  FolderOpen
+  FolderOpen,
+  PencilLine,
+  ToggleLeft,
+  ToggleRight
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -53,6 +57,9 @@ interface SidebarProps {
   setSelectedDrone: (drone: DroneCameraProfile) => void;
   stats: MissionStats | null;
   polygon: [number, number][];
+  setPolygon?: (polygon: [number, number][]) => void;
+  drawingMode?: DrawingMode;
+  setDrawingMode?: (mode: DrawingMode) => void;
   waypoints: Waypoint[];
   takeoffPoint?: TakeoffPoint;
   elevationProfile: ElevationPoint[];
@@ -81,6 +88,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setSelectedDrone,
   stats,
   polygon,
+  setPolygon,
+  drawingMode = 'none',
+  setDrawingMode,
   waypoints,
   takeoffPoint,
   elevationProfile,
@@ -300,6 +310,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* TAB 1: FLIGHT PARAMETERS */}
         {activeTab === 'params' && (
           <div className="flex flex-col gap-4">
+            {/* Polygon Geometry & Quick Edit Box */}
+            <div className="bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800 flex flex-col gap-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <PencilLine className="w-4 h-4 text-sky-400" />
+                  <span className="text-xs font-bold text-slate-200">Polígono da Área</span>
+                </div>
+                <span className="text-[11px] font-mono font-bold text-cyan-400 bg-cyan-950/60 px-2 py-0.5 rounded-lg border border-cyan-800/40">
+                  {polygon.length} vértices
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setDrawingMode && setDrawingMode(drawingMode === 'edit_polygon' ? 'none' : 'edit_polygon')}
+                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md ${
+                    drawingMode === 'edit_polygon'
+                      ? 'bg-sky-500 text-slate-950 shadow-sky-500/20'
+                      : 'bg-slate-800 text-sky-300 hover:bg-slate-700 hover:text-white border border-slate-700'
+                  }`}
+                >
+                  <PencilLine className="w-3.5 h-3.5" />
+                  <span>{drawingMode === 'edit_polygon' ? 'Concluir Edição' : 'Editar Vértices'}</span>
+                </button>
+
+                <button
+                  onClick={() => setDrawingMode && setDrawingMode(drawingMode === 'polygon' ? 'none' : 'polygon')}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all ${
+                    drawingMode === 'polygon'
+                      ? 'bg-cyan-500 text-slate-950 font-bold'
+                      : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700'
+                  }`}
+                  title="Desenhar novo polígono ou adicionar mais vértices"
+                >
+                  <span>+ Pontos</span>
+                </button>
+              </div>
+
+              {polygon.length >= 3 && stats && (
+                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-900">
+                  <span>Área Total Coberta:</span>
+                  <span className="text-emerald-400 font-bold font-mono">{stats.areaHa} ha ({stats.areaKm2} km²)</span>
+                </div>
+              )}
+            </div>
+
             {/* Drone & Sensor Picker */}
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
@@ -511,7 +567,55 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             {/* Turn & Partition Settings */}
             <div className="bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800 flex flex-col gap-3">
+              {/* Terrain Follow SRTM Toggle */}
               <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
+                    config.terrainFollowEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'
+                  }`}>
+                    <Mountain className="w-4 h-4" />
+                  </div>
+                  <div className="flex flex-col">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-slate-100">Acompanhar Terreno (SRTM)</span>
+                      <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${
+                        config.terrainFollowEnabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'
+                      }`}>
+                        {config.terrainFollowEnabled ? 'ATIVO' : 'DESATIVADO'}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-400">
+                      {config.terrainFollowEnabled
+                        ? 'Voo adaptativo: mantém GSD e altura constante do solo'
+                        : 'Plano horizontal fixo: voa na cota constante do Home'}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  id="toggle-terrain-follow-params"
+                  onClick={() => setConfig((prev) => ({
+                    ...prev,
+                    terrainFollowEnabled: !prev.terrainFollowEnabled,
+                    altitudeMode: !prev.terrainFollowEnabled ? 'TERRAIN_FOLLOW' : 'AGL'
+                  }))}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    config.terrainFollowEnabled ? 'bg-emerald-500' : 'bg-slate-700'
+                  }`}
+                  role="switch"
+                  aria-checked={config.terrainFollowEnabled}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      config.terrainFollowEnabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between border-t border-slate-800/80 pt-2.5">
                 <div className="flex flex-col">
                   <span className="text-xs font-bold text-slate-200">Divisão Automática DJI (200 Waypoints)</span>
                   <span className="text-[10px] text-slate-400">Gera múltiplos KMZ se ultrapassar o limite</span>
@@ -540,27 +644,64 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* TAB 2: TERRAIN FOLLOW (SRTM) */}
         {activeTab === 'terrain' && (
           <div className="flex flex-col gap-4">
-            <div className="bg-gradient-to-br from-emerald-950/40 to-slate-950 p-4 rounded-3xl border border-emerald-800/40 flex flex-col gap-3">
+            <div className={`p-4 rounded-3xl border transition-all flex flex-col gap-3.5 ${
+              config.terrainFollowEnabled
+                ? 'bg-gradient-to-br from-emerald-950/40 to-slate-950 border-emerald-800/40'
+                : 'bg-slate-950/90 border-slate-800'
+            }`}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Mountain className="w-5 h-5 text-emerald-400" />
-                  <h3 className="text-sm font-bold text-emerald-300">
+                  <Mountain className={`w-5 h-5 ${config.terrainFollowEnabled ? 'text-emerald-400' : 'text-slate-400'}`} />
+                  <h3 className={`text-sm font-bold ${config.terrainFollowEnabled ? 'text-emerald-300' : 'text-slate-200'}`}>
                     Acompanhamento de Terreno SRTM
                   </h3>
                 </div>
-                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-bold px-2 py-0.5 rounded-full">
-                  GRATUITO
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    config.terrainFollowEnabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'
+                  }`}>
+                    {config.terrainFollowEnabled ? 'HABILITADO' : 'DESABILITADO'}
+                  </span>
+
+                  <button
+                    type="button"
+                    id="toggle-terrain-follow-tab"
+                    onClick={() => setConfig((prev) => ({
+                      ...prev,
+                      terrainFollowEnabled: !prev.terrainFollowEnabled,
+                      altitudeMode: !prev.terrainFollowEnabled ? 'TERRAIN_FOLLOW' : 'AGL'
+                    }))}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      config.terrainFollowEnabled ? 'bg-emerald-500' : 'bg-slate-700'
+                    }`}
+                    role="switch"
+                    aria-checked={config.terrainFollowEnabled}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        config.terrainFollowEnabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
+
               <p className="text-xs text-slate-300 leading-relaxed">
-                O GeoFly ajusta a altitude de cada waypoint individualmente com base no modelo digital de elevação SRTM, garantindo que o drone mantenha sempre a mesma distância do solo (GSD uniforme e segurança total contra morros e aclives).
+                {config.terrainFollowEnabled
+                  ? 'O GeoFly ajusta a altitude de cada waypoint individualmente com base no modelo digital de elevação SRTM, garantindo que o drone mantenha sempre a mesma distância do solo (GSD uniforme e segurança total contra morros e aclives).'
+                  : 'O acompanhamento de terreno está DESABILITADO. A missão será gerada em um plano horizontal plano na altitude constante selecionada (relativa ao ponto de decolagem).'}
               </p>
 
               <div className="flex items-center justify-between pt-1">
                 <button
                   onClick={onRecalculateTerrain}
                   disabled={isRecalculatingTerrain || waypoints.length === 0}
-                  className="px-3 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
+                  className={`px-3 py-2 font-bold rounded-xl text-xs flex items-center gap-2 transition-all shadow-lg ${
+                    config.terrainFollowEnabled
+                      ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 shadow-none'
+                  } disabled:opacity-50`}
                 >
                   <RotateCw className={`w-3.5 h-3.5 ${isRecalculatingTerrain ? 'animate-spin' : ''}`} />
                   <span>{isRecalculatingTerrain ? 'Consultando SRTM...' : 'Recalcular Relevo Agora'}</span>
@@ -568,7 +709,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                 {takeoffPoint && (
                   <span className="text-xs font-mono text-emerald-400">
-                    Home: {takeoffPoint.elevationMsl.toFixed(1)}m
+                    Home: {takeoffPoint.elevationMsl.toFixed(1)}m MSL
                   </span>
                 )}
               </div>
@@ -581,6 +722,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               maxElevation={maxElevation}
               elevationDiff={elevationDiff}
               targetAltitudeAgl={config.targetAltitudeAgl}
+              terrainFollowEnabled={config.terrainFollowEnabled}
             />
 
             {/* Topography tips */}

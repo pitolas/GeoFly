@@ -18,6 +18,7 @@ interface ElevationProfileChartProps {
   maxElevation: number;
   elevationDiff: number;
   targetAltitudeAgl: number;
+  terrainFollowEnabled?: boolean;
   onHoverPoint?: (waypointId: number | null) => void;
 }
 
@@ -27,6 +28,7 @@ export const ElevationProfileChart: React.FC<ElevationProfileChartProps> = ({
   maxElevation,
   elevationDiff,
   targetAltitudeAgl,
+  terrainFollowEnabled = true,
   onHoverPoint
 }) => {
   if (!data || data.length === 0) {
@@ -156,21 +158,25 @@ export const ElevationProfileChart: React.FC<ElevationProfileChartProps> = ({
       </div>
 
       {/* Legend & Advice */}
-      <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
+      <div className="flex items-center justify-between text-[11px] text-slate-400 px-1 flex-wrap gap-2">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
             <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
             <span>Relevo (SRTM)</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <div className="w-2.5 h-0.5 bg-amber-500" />
-            <span>Linha de Voo ({targetAltitudeAgl}m AGL constante)</span>
+            <div className={`w-2.5 h-0.5 ${terrainFollowEnabled ? 'bg-amber-500' : 'bg-cyan-400'}`} />
+            <span className="font-medium text-slate-300">
+              {terrainFollowEnabled
+                ? `Voo Adaptativo (${targetAltitudeAgl}m AGL constante)`
+                : `Voo Plano Fixo (${targetAltitudeAgl}m relativo ao Home)`}
+            </span>
           </div>
         </div>
         {elevationDiff > 30 && (
           <div className="flex items-center gap-1 text-amber-400 font-medium">
             <AlertTriangle className="w-3.5 h-3.5" />
-            <span>Acompanhamento recomendado</span>
+            <span>{terrainFollowEnabled ? 'Relevo ondulado detectado' : 'Atenção: Acompanhamento desativado em relevo acidentado'}</span>
           </div>
         )}
       </div>

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
-import { Waypoint, FlightLine, TakeoffPoint, UtmCoordinate, SimDronePosition } from '../types';
-import { latLngToUtm } from '../utils/geometry';
+import { Waypoint, FlightLine, TakeoffPoint, UtmCoordinate, SimDronePosition, DrawingMode } from '../types';
+import { latLngToUtm, getPolygonCentroid, getPolygonAreaM2, getDistanceM } from '../utils/geometry';
 import { fetchCoordinateElevation } from '../utils/srtm';
 import {
   Layers,
@@ -12,6 +12,7 @@ import {
   Compass,
   Navigation,
   Pencil,
+  PencilLine,
   Spline,
   ZoomIn,
   ZoomOut,
@@ -20,7 +21,12 @@ import {
   Loader2,
   X,
   Building2,
-  MapPinCheck
+  MapPinCheck,
+  Move,
+  Plus,
+  RotateCw,
+  Check,
+  ArrowLeftRight
 } from 'lucide-react';
 
 // Fix default Leaflet icon paths
@@ -55,8 +61,8 @@ interface MapViewProps {
   isSimulating: boolean;
   simDronePosition?: SimDronePosition | null;
   gridType: 'single' | 'double' | 'corridor' | 'perimeter';
-  drawingMode: 'none' | 'polygon' | 'corridor' | 'takeoff';
-  setDrawingMode: (mode: 'none' | 'polygon' | 'corridor' | 'takeoff') => void;
+  drawingMode: DrawingMode;
+  setDrawingMode: (mode: DrawingMode) => void;
 }
 
 export const MapView: React.FC<MapViewProps> = ({
@@ -381,7 +387,7 @@ export const MapView: React.FC<MapViewProps> = ({
     };
   }, [drawingMode, polygon, setPolygon, setTakeoffPoint, setDrawingMode]);
 
-  // Render Polygon and Vertices
+  // Render Polygon, Draggable Numbered Vertices, Midpoints (+), and Centroid Move handle
   useEffect(() => {
     if (!polygonLayerGroupRef.current || !mapRef.current) return;
     const group = polygonLayerGroupRef.current;
@@ -389,23 +395,26 @@ export const MapView: React.FC<MapViewProps> = ({
 
     if (polygon.length === 0) return;
 
+    const isEditMode = drawingMode === 'edit_polygon' || drawingMode === 'polygon';
+    const isClosedPolygon = gridType !== 'corridor' && polygon.length >= 3;
+
     if (gridType === 'corridor') {
-      // Render as thick corridor polyline with dashed vertices
+      // Render as corridor polyline
       const polyline = L.polyline(polygon, {
-        color: '#06b6d4',
+        color: isEditMode ? '#38bdf8' : '#06b6d4',
         weight: 4,
-        dashArray: '8, 8',
-        opacity: 0.9
+        dashArray: isEditMode ? '6, 6' : '8, 8',
+        opacity: 0.95
       });
       group.addLayer(polyline);
     } else if (polygon.length >= 3) {
       // Render as closed polygon
       const poly = L.polygon(polygon, {
-        color: '#06b6d4',
-        weight: 2.5,
+        color: isEditMode ? '#38bdf8' : '#06b6d4',
+        weight: isEditMode ? 3 : 2.5,
         fillColor: '#0891b2',
-        fillOpacity: 0.18,
-        dashArray: '6, 6'
+        fillOpacity: isEditMode ? 0.25 : 0.18,
+        dashArray: isEditMode ? '4, 4' : '6, 6'
       });
       group.addLayer(poly);
     } else if (polygon.length === 2) {
@@ -417,18 +426,40 @@ export const MapView: React.FC<MapViewProps> = ({
       group.addLayer(line);
     }
 
-    // Render draggable vertex handles
+    // 1. Draggable Numbered Vertex Handles
     polygon.forEach((pt, idx) => {
       const vertexIcon = L.divIcon({
         className: 'custom-vertex-marker',
-        html: `<div style="width: 14px; height: 14px; background: #06b6d4; border: 2px solid #ffffff; border-radius: 50%; box-shadow: 0 0 6px rgba(0,0,0,0.6); cursor: grab;"></div>`,
-        iconSize: [14, 14],
-        iconAnchor: [7, 7]
+        html: `
+          <div style="
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            background: ${isEditMode ? '#0284c7' : '#0891b2'};
+            border: 2.5px solid #ffffff;
+            border-radius: 50%;
+            color: #ffffff;
+            font-family: monospace, sans-serif;
+            font-size: 11px;
+            font-weight: 800;
+            box-shadow: 0 0 10px rgba(6, 182, 212, 0.8), 0 2px 5px rgba(0,0,0,0.5);
+            cursor: grab;
+            user-select: none;
+            transition: transform 0.15s ease;
+          ">
+            ${idx + 1}
+          </div>
+        `,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
       });
 
       const marker = L.marker(pt, {
         icon: vertexIcon,
-        draggable: true
+        draggable: true,
+        zIndexOffset: 500
       });
 
       marker.on('drag', (e: any) => {
@@ -438,9 +469,36 @@ export const MapView: React.FC<MapViewProps> = ({
         setPolygon(updated);
       });
 
-      // Right click or double click to remove vertex
+      const utm = latLngToUtm(pt[0], pt[1]);
+      marker.bindTooltip(
+        `<b>Vértice #${idx + 1}</b><br/>Lat: ${pt[0].toFixed(5)}°<br/>Lng: ${pt[1].toFixed(5)}°<br/>UTM: ${utm.formatted}<br/><span style="color:#38bdf8; font-size:10px;">Arraste para mover | Botão direito para excluir</span>`,
+        { direction: 'top', offset: [0, -12] }
+      );
+
+      // Popup with explicit delete vertex button
+      const popupContent = document.createElement('div');
+      popupContent.style.cssText = 'min-width: 140px; font-family: sans-serif; font-size: 12px;';
+      popupContent.innerHTML = `
+        <div style="font-weight: 700; color: #0f172a; margin-bottom: 2px;">Vértice #${idx + 1}</div>
+        <div style="color: #64748b; font-size: 11px; margin-bottom: 6px;">${pt[0].toFixed(5)}°, ${pt[1].toFixed(5)}°</div>
+      `;
+
+      if (polygon.length > (gridType === 'corridor' ? 2 : 3)) {
+        const delBtn = document.createElement('button');
+        delBtn.textContent = 'Excluir Vértice';
+        delBtn.style.cssText = 'width: 100%; background: #ef4444; color: white; border: none; padding: 4px 8px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 11px;';
+        delBtn.onclick = () => {
+          const updated = polygon.filter((_, i) => i !== idx);
+          setPolygon(updated);
+        };
+        popupContent.appendChild(delBtn);
+      }
+
+      marker.bindPopup(popupContent, { offset: [0, -10] });
+
+      // Right click or double click to quickly remove vertex
       marker.on('contextmenu', () => {
-        if (polygon.length > 1) {
+        if (polygon.length > (gridType === 'corridor' ? 2 : 3)) {
           const updated = polygon.filter((_, i) => i !== idx);
           setPolygon(updated);
         }
@@ -448,7 +506,131 @@ export const MapView: React.FC<MapViewProps> = ({
 
       group.addLayer(marker);
     });
-  }, [polygon, gridType, setPolygon]);
+
+    // 2. Midpoint handles (+) between consecutive vertices to insert new vertices
+    const numEdges = isClosedPolygon ? polygon.length : polygon.length - 1;
+    for (let i = 0; i < numEdges; i++) {
+      const p1 = polygon[i];
+      const p2 = polygon[(i + 1) % polygon.length];
+      const midLat = (p1[0] + p2[0]) / 2;
+      const midLng = (p1[1] + p2[1]) / 2;
+
+      const midIcon = L.divIcon({
+        className: 'custom-midpoint-marker',
+        html: `
+          <div style="
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            background: rgba(14, 165, 233, 0.85);
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: 900;
+            line-height: 1;
+            box-shadow: 0 0 6px rgba(0,0,0,0.5);
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.15s ease;
+          ">
+            +
+          </div>
+        `,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9]
+      });
+
+      const midMarker = L.marker([midLat, midLng], {
+        icon: midIcon,
+        draggable: true,
+        zIndexOffset: 300
+      });
+
+      midMarker.bindTooltip('<b>Inserir Vértice</b><br/>Clique ou arraste para adicionar ponto nesta aresta', {
+        direction: 'top',
+        offset: [0, -10]
+      });
+
+      // When dragging or clicking midpoint, insert vertex into polygon array
+      midMarker.on('dragstart', () => {
+        const updated = [...polygon.slice(0, i + 1), [midLat, midLng] as [number, number], ...polygon.slice(i + 1)];
+        setPolygon(updated);
+      });
+
+      midMarker.on('click', () => {
+        const updated = [...polygon.slice(0, i + 1), [midLat, midLng] as [number, number], ...polygon.slice(i + 1)];
+        setPolygon(updated);
+      });
+
+      group.addLayer(midMarker);
+    }
+
+    // 3. Centroid Move Handle (Translates entire polygon across map)
+    if (isClosedPolygon) {
+      const centroid = getPolygonCentroid(polygon);
+      const centroidIcon = L.divIcon({
+        className: 'custom-centroid-marker',
+        html: `
+          <div style="
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            background: rgba(15, 23, 42, 0.9);
+            border: 2px solid #38bdf8;
+            border-radius: 8px;
+            color: #38bdf8;
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
+            cursor: move;
+            transition: all 0.15s ease;
+          ">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="5 9 2 12 5 15"></polyline>
+              <polyline points="9 5 12 2 15 5"></polyline>
+              <polyline points="15 19 12 22 9 19"></polyline>
+              <polyline points="19 9 22 12 19 15"></polyline>
+              <line x1="2" y1="12" x2="22" y2="12"></line>
+              <line x1="12" y1="2" x2="12" y2="22"></line>
+            </svg>
+          </div>
+        `,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
+      });
+
+      const centroidMarker = L.marker(centroid, {
+        icon: centroidIcon,
+        draggable: true,
+        zIndexOffset: 400
+      });
+
+      centroidMarker.bindTooltip('<b>Mover Toda a Área</b><br/>Arraste para reposicionar o polígono completo no mapa', {
+        direction: 'top',
+        offset: [0, -14]
+      });
+
+      let dragStartLatLng = L.latLng(centroid[0], centroid[1]);
+      centroidMarker.on('dragstart', (e: any) => {
+        dragStartLatLng = e.target.getLatLng();
+      });
+
+      centroidMarker.on('drag', (e: any) => {
+        const currentLatLng = e.target.getLatLng();
+        const dLat = currentLatLng.lat - dragStartLatLng.lat;
+        const dLng = currentLatLng.lng - dragStartLatLng.lng;
+        dragStartLatLng = currentLatLng;
+
+        const updated = polygon.map(([lat, lng]) => [lat + dLat, lng + dLng] as [number, number]);
+        setPolygon(updated);
+      });
+
+      group.addLayer(centroidMarker);
+    }
+  }, [polygon, gridType, drawingMode, setPolygon]);
 
   // Render Flight Lines and Waypoints
   useEffect(() => {
@@ -781,13 +963,29 @@ export const MapView: React.FC<MapViewProps> = ({
               onClick={() => setDrawingMode(drawingMode === 'polygon' ? 'none' : 'polygon')}
               className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
                 drawingMode === 'polygon'
-                  ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/30'
+                  ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/30 font-bold'
                   : 'text-slate-200 hover:bg-slate-800'
               }`}
-              title="Clique no mapa para adicionar vértices do polígono"
+              title="Clique no mapa para adicionar novos vértices do polígono"
             >
               <Pencil className="w-3.5 h-3.5" />
               <span>Polígono</span>
+            </button>
+
+            <button
+              id="btn-edit-polygon"
+              onClick={() => setDrawingMode(drawingMode === 'edit_polygon' ? 'none' : 'edit_polygon')}
+              className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                drawingMode === 'edit_polygon'
+                  ? 'bg-sky-500 text-slate-950 shadow-lg shadow-sky-500/30 font-bold'
+                  : polygon.length > 0
+                  ? 'text-sky-400 hover:bg-slate-800'
+                  : 'text-slate-500 hover:bg-slate-800'
+              }`}
+              title="Editar vértices do polígono: arrastar pontos, adicionar novos nós ou mover área inteira"
+            >
+              <PencilLine className="w-3.5 h-3.5" />
+              <span>Editar Polígono</span>
             </button>
 
             <button
@@ -795,7 +993,7 @@ export const MapView: React.FC<MapViewProps> = ({
               onClick={() => setDrawingMode(drawingMode === 'corridor' ? 'none' : 'corridor')}
               className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
                 drawingMode === 'corridor'
-                  ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/30'
+                  ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/30 font-bold'
                   : 'text-slate-200 hover:bg-slate-800'
               }`}
               title="Clique no mapa para criar traçado de corredor linear"
@@ -809,7 +1007,7 @@ export const MapView: React.FC<MapViewProps> = ({
               onClick={() => setDrawingMode(drawingMode === 'takeoff' ? 'none' : 'takeoff')}
               className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
                 drawingMode === 'takeoff'
-                  ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/30'
+                  ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/30 font-bold'
                   : 'text-slate-200 hover:bg-slate-800'
               }`}
               title="Clique no mapa para definir o ponto de decolagem (Home Point)"
@@ -833,12 +1031,68 @@ export const MapView: React.FC<MapViewProps> = ({
             )}
           </div>
 
-          {/* Informative helper badge when drawing */}
-          {drawingMode !== 'none' && (
+          {/* Floating Polygon Editing HUD Bar */}
+          {(drawingMode === 'edit_polygon' || (drawingMode === 'polygon' && polygon.length > 0)) && (
+            <div className="bg-slate-900/95 backdrop-blur-md border border-sky-500/40 rounded-2xl p-3 shadow-2xl flex flex-col gap-2 max-w-xs animate-fadeIn">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
+                  <PencilLine className="w-3.5 h-3.5" />
+                  <span>Edição ({polygon.length} vértices)</span>
+                </span>
+                <button
+                  onClick={() => setDrawingMode('none')}
+                  className="text-xs font-bold text-slate-300 hover:text-white px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center gap-1 transition-colors border border-slate-700"
+                  title="Concluir edição"
+                >
+                  <Check className="w-3 h-3 text-emerald-400" />
+                  <span>Concluir</span>
+                </button>
+              </div>
+
+              {polygon.length >= 3 && gridType !== 'corridor' && (
+                <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono bg-slate-950/70 p-2 rounded-xl border border-slate-800">
+                  <div className="text-slate-400">
+                    Área: <span className="text-emerald-400 font-bold">{(getPolygonAreaM2(polygon) / 10000).toFixed(2)} ha</span>
+                  </div>
+                  <div className="text-slate-400">
+                    Perímetro: <span className="text-cyan-400 font-bold">{polygon.reduce((acc, pt, i) => acc + getDistanceM(pt[0], pt[1], polygon[(i + 1) % polygon.length][0], polygon[(i + 1) % polygon.length][1]), 0).toFixed(0)} m</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-1.5 pt-0.5">
+                <button
+                  onClick={() => setDrawingMode('polygon')}
+                  className={`flex-1 py-1.5 px-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition-colors ${
+                    drawingMode === 'polygon' ? 'bg-cyan-500 text-slate-950 font-bold' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
+                  }`}
+                  title="Clique no mapa para inserir novos vértices"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>+ Inserir Pontos</span>
+                </button>
+
+                <button
+                  onClick={() => setPolygon([...polygon].reverse())}
+                  className="py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-[11px] font-bold flex items-center gap-1 transition-colors"
+                  title="Inverter sentido dos vértices"
+                >
+                  <ArrowLeftRight className="w-3 h-3" />
+                  <span>Inverter</span>
+                </button>
+              </div>
+
+              <p className="text-[10px] text-slate-400 leading-tight">
+                💡 <b>Dicas:</b> Arraste os nós numerados para mover. Clique no <b>+</b> entre os pontos para criar vértices. Arraste o ícone central para mover a área toda.
+              </p>
+            </div>
+          )}
+
+          {/* Informative helper badge when drawing other modes */}
+          {drawingMode !== 'none' && drawingMode !== 'edit_polygon' && drawingMode !== 'polygon' && (
             <div className="bg-cyan-950/90 backdrop-blur-md border border-cyan-700/50 rounded-lg px-3 py-2 text-xs text-cyan-200 flex items-center gap-2 shadow-lg animate-pulse max-w-sm">
               <Info className="w-4 h-4 text-cyan-400 shrink-0" />
               <span>
-                {drawingMode === 'polygon' && 'Clique no mapa para adicionar os pontos da área.'}
                 {drawingMode === 'corridor' && 'Clique no mapa ao longo da rodovia/canal/linha.'}
                 {drawingMode === 'takeoff' && 'Clique onde o drone irá decolar para registrar a cota de referência.'}
               </span>

@@ -7,7 +7,8 @@ import {
   FlightLine,
   TakeoffPoint,
   ElevationPoint,
-  SimDronePosition
+  SimDronePosition,
+  DrawingMode
 } from './types';
 import { DRONE_PROFILES, DEFAULT_FLIGHT_CONFIG } from './constants/drones';
 import { SAMPLE_MISSIONS } from './constants/sampleMissions';
@@ -45,7 +46,7 @@ export default function App() {
   const [isRecalculatingTerrain, setIsRecalculatingTerrain] = useState<boolean>(false);
 
   // Map drawing state
-  const [drawingMode, setDrawingMode] = useState<'none' | 'polygon' | 'corridor' | 'takeoff'>('none');
+  const [drawingMode, setDrawingMode] = useState<DrawingMode>('none');
   const [selectedWaypointId, setSelectedWaypointId] = useState<number | null>(null);
 
   // Modals & Simulation
@@ -79,7 +80,7 @@ export default function App() {
     setWaypoints(missionResult.waypoints);
     setStats(missionResult.stats);
 
-    // Update with SRTM terrain data
+    // Update with SRTM terrain data (or flat plane if disabled)
     let isCancelled = false;
     const fetchTerrain = async () => {
       setIsRecalculatingTerrain(true);
@@ -87,7 +88,8 @@ export default function App() {
         const terrainResult = await updateWaypointsWithTerrainData(
           missionResult.waypoints,
           config.targetAltitudeAgl,
-          takeoffPoint
+          takeoffPoint,
+          config.terrainFollowEnabled
         );
 
         if (!isCancelled) {
@@ -132,6 +134,7 @@ export default function App() {
     config.gimbalPitchDeg,
     config.curvedTurns,
     config.maxWaypointsPerFile,
+    config.terrainFollowEnabled,
     takeoffPoint
   ]);
 
@@ -143,7 +146,8 @@ export default function App() {
       const terrainResult = await updateWaypointsWithTerrainData(
         waypoints,
         config.targetAltitudeAgl,
-        takeoffPoint
+        takeoffPoint,
+        config.terrainFollowEnabled
       );
       setWaypoints(terrainResult.updatedWaypoints);
       setElevationProfile(terrainResult.elevationProfile);
@@ -261,6 +265,9 @@ export default function App() {
           setSelectedDrone={setSelectedDrone}
           stats={stats}
           polygon={polygon}
+          setPolygon={setPolygon}
+          drawingMode={drawingMode}
+          setDrawingMode={setDrawingMode}
           waypoints={waypoints}
           takeoffPoint={takeoffPoint}
           elevationProfile={elevationProfile}

@@ -56,6 +56,7 @@ export async function updateWaypointsWithTerrainData(
   waypoints: Waypoint[],
   targetAgl: number,
   takeoffPoint?: TakeoffPoint,
+  terrainFollowEnabled: boolean = true,
   onProgress?: (progressPercent: number) => void
 ): Promise<{
   updatedWaypoints: Waypoint[];
@@ -124,16 +125,27 @@ export async function updateWaypointsWithTerrainData(
     minElev = Math.min(minElev, groundElev);
     maxElev = Math.max(maxElev, groundElev);
 
-    // MSL altitude of drone = ground elevation + desired AGL clearance
-    const droneMsl = Math.round((groundElev + targetAgl) * 10) / 10;
-    // Relative altitude to takeoff location (for DJI and Litchi relative mode)
-    const relativeToTakeoff = Math.round((groundElev - takeoffGroundElev + targetAgl) * 10) / 10;
+    let droneMsl: number;
+    let relativeToTakeoff: number;
+    let clearanceAgl: number;
+
+    if (terrainFollowEnabled) {
+      // TERRAIN FOLLOW ACTIVE: Drone adapts its height to follow the contour of the terrain
+      droneMsl = Math.round((groundElev + targetAgl) * 10) / 10;
+      relativeToTakeoff = Math.round((groundElev - takeoffGroundElev + targetAgl) * 10) / 10;
+      clearanceAgl = targetAgl;
+    } else {
+      // TERRAIN FOLLOW DISABLED (FLAT PLANE): Drone flies at fixed altitude relative to takeoff
+      relativeToTakeoff = targetAgl;
+      droneMsl = Math.round((takeoffGroundElev + targetAgl) * 10) / 10;
+      clearanceAgl = Math.round((takeoffGroundElev + targetAgl - groundElev) * 10) / 10;
+    }
 
     const newWp: Waypoint = {
       ...wp,
       groundElevation: groundElev,
       altitudeMsl: droneMsl,
-      altitudeAgl: relativeToTakeoff // In DJI, waypoint altitude is relative to takeoff point
+      altitudeAgl: relativeToTakeoff
     };
 
     updated.push(newWp);
@@ -143,7 +155,7 @@ export async function updateWaypointsWithTerrainData(
       distanceM: wp.cumulativeDistanceM,
       groundElevationMsl: groundElev,
       droneAltitudeMsl: droneMsl,
-      clearanceAgl: targetAgl,
+      clearanceAgl,
       waypointId: wp.id,
       isPhoto: wp.isPhotoPoint
     });

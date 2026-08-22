@@ -24,6 +24,8 @@ export type FinishAction = 'RTH' | 'HOVER' | 'LAND' | 'GOTO_FIRST';
 
 export type PhotoTriggerMode = 'distance' | 'time' | 'waypoint';
 
+export type DrawingMode = 'none' | 'polygon' | 'corridor' | 'takeoff' | 'edit_polygon';
+
 export interface TakeoffPoint {
   lat: number;
   lng: number;
