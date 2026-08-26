@@ -897,24 +897,37 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="bg-slate-950/70 p-4 rounded-2xl border border-slate-800 flex flex-col gap-2.5 mt-1">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-200 flex items-center gap-1.5">
                 <HelpCircle className="w-4 h-4 text-cyan-400" />
-                <span>Como importar e voar no DJI Fly / RC / Pilot:</span>
+                <span>Instruções de Execução no DJI Fly & Pilot:</span>
               </span>
               <div className="flex flex-col gap-2 text-xs text-slate-300">
-                <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800 flex flex-col gap-1">
-                  <span className="font-bold text-cyan-400 text-[11px]">DJI Fly (Mini 4 Pro / Air 3 / Mavic 3 / RC / RC 2):</span>
-                  <ol className="list-decimal list-inside text-slate-400 space-y-0.5 text-[11px] leading-relaxed">
-                    <li>Copie o arquivo <b>.KMZ</b> baixado para o controle ou celular.</li>
-                    <li>Pasta padrão no Android: <code className="text-cyan-300 bg-slate-950 px-1 py-0.5 rounded text-[10px]">Android/data/dji.go.v5/files/waypoint</code></li>
-                    <li>No DJI Fly: abra a câmera, toque no ícone de <b>Waypoints</b> à esquerda, abra a <b>Biblioteca</b> e clique no ícone de <b>Importar KMZ</b>.</li>
+                <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 flex flex-col gap-1.5">
+                  <span className="font-bold text-cyan-400 text-[11px] flex items-center gap-1">
+                    <span>DJI Fly (Mini 4 Pro / Air 3 / Air 3S / Mavic 3 / RC 2 / RC Pro):</span>
+                  </span>
+                  <ol className="list-decimal list-inside text-slate-400 space-y-1 text-[11px] leading-relaxed">
+                    <li>Copie o arquivo <b>.KMZ</b> gerado para a memória interna do controle ou smartphone.</li>
+                    <li>No Android/DJI RC: cole em <code className="text-cyan-300 bg-slate-950 px-1 py-0.5 rounded text-[10px]">Android/data/dji.go.v5/files/waypoint</code></li>
+                    <li>No app DJI Fly: com o drone conectado e GPS travado (&gt;10 satélites), toque no ícone de <b>Waypoints</b> na lateral esquerda da tela de câmera.</li>
+                    <li>Abra a <b>Biblioteca de Rotas</b>, selecione a rota importada e pressione <b>Iniciar / Executar Voo (GO)</b>.</li>
+                  </ol>
+                  <div className="text-[10px] text-amber-300/90 bg-amber-950/30 border border-amber-800/40 p-2 rounded-lg mt-1">
+                    <b>Dica de Compatibilidade:</b> O formato WPML foi atualizado com cotas relativas calibradas (<code className="text-amber-200">relativeToStartPoint</code>), enums DJI oficiais e ações de disparo simplificadas para evitar o erro de execução em drones de consumo.
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 flex flex-col gap-1.5">
+                  <span className="font-bold text-emerald-400 text-[11px]">DJI Pilot 2 (Mavic 3 Enterprise / M3M / Matrice 350 / 300):</span>
+                  <ol className="list-decimal list-inside text-slate-400 space-y-1 text-[11px] leading-relaxed">
+                    <li>No menu principal do DJI Pilot 2, entre em <b>Rota de Voo (Flight Route)</b>.</li>
+                    <li>Toque em <b>Importar Rota (KMZ)</b> e selecione o arquivo gerado pelo GeoFly.</li>
                   </ol>
                 </div>
 
-                <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800 flex flex-col gap-1">
-                  <span className="font-bold text-emerald-400 text-[11px]">DJI Pilot 2 (Mavic 3 Enterprise / M3M / Matrice 350):</span>
-                  <ol className="list-decimal list-inside text-slate-400 space-y-0.5 text-[11px] leading-relaxed">
-                    <li>No menu principal do DJI Pilot 2, entre em <b>Rota de Voo (Flight Route)</b>.</li>
-                    <li>Toque em <b>Importar Rota (KMZ)</b> e selecione o arquivo gerado.</li>
-                  </ol>
+                <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 flex flex-col gap-1.5">
+                  <span className="font-bold text-blue-400 text-[11px]">Drones sem Waypoints Nativos no DJI Fly (ex: Mini 2, Mini SE, Air 2S):</span>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Utilize a opção <b>Litchi Mission (.CSV)</b> ou o app Litchi / Maven Pilot para voar missões de waypoints com disparo automatizado nesses modelos.
+                  </p>
                 </div>
               </div>
             </div>
