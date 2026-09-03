@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
-import { Waypoint, FlightLine, TakeoffPoint, UtmCoordinate, SimDronePosition, DrawingMode, PanoramaStation } from '../types';
+import { Waypoint, FlightLine, TakeoffPoint, UtmCoordinate, SimDronePosition, DrawingMode } from '../types';
 import { latLngToUtm, getPolygonCentroid, getPolygonAreaM2, getDistanceM } from '../utils/geometry';
 import { fetchCoordinateElevation } from '../utils/srtm';
 import {
@@ -26,8 +26,7 @@ import {
   Plus,
   RotateCw,
   Check,
-  ArrowLeftRight,
-  Camera
+  ArrowLeftRight
 } from 'lucide-react';
 
 // Fix default Leaflet icon paths
@@ -64,10 +63,6 @@ interface MapViewProps {
   gridType: 'single' | 'double' | 'corridor' | 'perimeter';
   drawingMode: DrawingMode;
   setDrawingMode: (mode: DrawingMode) => void;
-  panoramaStations?: PanoramaStation[];
-  setPanoramaStations?: React.Dispatch<React.SetStateAction<PanoramaStation[]>>;
-  selectedPanoramaId?: string | null;
-  onSelectPanorama?: (station: PanoramaStation) => void;
 }
 
 export const MapView: React.FC<MapViewProps> = ({
@@ -83,11 +78,7 @@ export const MapView: React.FC<MapViewProps> = ({
   simDronePosition,
   gridType,
   drawingMode,
-  setDrawingMode,
-  panoramaStations = [],
-  setPanoramaStations,
-  selectedPanoramaId,
-  onSelectPanorama
+  setDrawingMode
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -97,7 +88,6 @@ export const MapView: React.FC<MapViewProps> = ({
   const polygonLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const flightPathLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const waypointsLayerGroupRef = useRef<L.LayerGroup | null>(null);
-  const panoramaLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const takeoffMarkerRef = useRef<L.Marker | null>(null);
   const simDroneMarkerRef = useRef<L.Marker | null>(null);
   const simFlownPolylineRef = useRef<L.Polyline | null>(null);
@@ -320,7 +310,6 @@ export const MapView: React.FC<MapViewProps> = ({
     polygonLayerGroupRef.current = L.layerGroup().addTo(map);
     flightPathLayerGroupRef.current = L.layerGroup().addTo(map);
     waypointsLayerGroupRef.current = L.layerGroup().addTo(map);
-    panoramaLayerGroupRef.current = L.layerGroup().addTo(map);
 
     // Mouse Move listener for coordinate display
     let elevationTimeout: any = null;
@@ -389,29 +378,6 @@ export const MapView: React.FC<MapViewProps> = ({
           elevationMsl: elev
         });
         setDrawingMode('none');
-      } else if (drawingMode === 'panorama') {
-        const nextNum = (panoramaStations?.length || 0) + 1;
-        const pad = String(nextNum).padStart(2, '0');
-        const newStation: PanoramaStation = {
-          id: `PANO_${String(nextNum).padStart(3, '0')}`,
-          nome: `Panorama ${pad}`,
-          latitude: newPt[0],
-          longitude: newPt[1],
-          altitude: 80,
-          tipo: 'panorama_360_completo',
-          headingInicial: 0,
-          hoverEstabilizacao: 2.5,
-          hoverFoto: 0.5,
-          numeroFotos: 33,
-          numeroWaypoints: 66,
-          assignedMissionName: 'Missão 1'
-        };
-        if (setPanoramaStations) {
-          setPanoramaStations((prev) => [...prev, newStation]);
-        }
-        if (onSelectPanorama) {
-          onSelectPanorama(newStation);
-        }
       }
     };
 
@@ -419,7 +385,7 @@ export const MapView: React.FC<MapViewProps> = ({
     return () => {
       map.off('click', handleMapClick);
     };
-  }, [drawingMode, polygon, setPolygon, setTakeoffPoint, setDrawingMode, panoramaStations, setPanoramaStations, onSelectPanorama]);
+  }, [drawingMode, polygon, setPolygon, setTakeoffPoint, setDrawingMode]);
 
   // Render Polygon, Draggable Numbered Vertices, Midpoints (+), and Centroid Move handle
   useEffect(() => {
@@ -798,103 +764,6 @@ export const MapView: React.FC<MapViewProps> = ({
     }
   }, [takeoffPoint, setTakeoffPoint]);
 
-  // Render 360° Panorama Stations Layer
-  useEffect(() => {
-    if (!panoramaLayerGroupRef.current || !mapRef.current) return;
-    const panoGroup = panoramaLayerGroupRef.current;
-    panoGroup.clearLayers();
-
-    if (panoramaStations.length === 0) return;
-
-    // Draw connected path line between consecutive panorama stations
-    if (panoramaStations.length > 1) {
-      const panoLatLngs = panoramaStations.map((s) => [s.latitude, s.longitude] as [number, number]);
-      const panoFlightTrack = L.polyline(panoLatLngs, {
-        color: '#10b981',
-        weight: 3,
-        dashArray: '6, 6',
-        opacity: 0.85
-      });
-      panoGroup.addLayer(panoFlightTrack);
-    }
-
-    // Render individual Panorama Station Markers
-    panoramaStations.forEach((station, idx) => {
-      const isSelected = selectedPanoramaId === station.id;
-      const markerNumber = idx + 1;
-
-      const panoIcon = L.divIcon({
-        className: 'custom-panorama-marker',
-        html: `
-          <div style="
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: ${isSelected ? '38px' : '32px'};
-            height: ${isSelected ? '38px' : '32px'};
-            background: ${isSelected ? '#059669' : '#047857'};
-            border: ${isSelected ? '3px solid #34d399' : '2px solid #ffffff'};
-            border-radius: 50%;
-            color: #ffffff;
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-weight: 800;
-            font-size: 12px;
-            box-shadow: 0 0 ${isSelected ? '14px rgba(52, 211, 153, 0.9)' : '8px rgba(0,0,0,0.5)'};
-            cursor: grab;
-            user-select: none;
-            transition: all 0.15s ease;
-          ">
-            <span>P${markerNumber}</span>
-            <div style="
-              position: absolute;
-              bottom: -6px;
-              right: -6px;
-              background: #0f172a;
-              border: 1.5px solid #34d399;
-              border-radius: 6px;
-              padding: 0 3px;
-              font-size: 8px;
-              color: #34d399;
-              font-weight: 900;
-            ">360°</div>
-          </div>
-        `,
-        iconSize: [isSelected ? 38 : 32, isSelected ? 38 : 32],
-        iconAnchor: [isSelected ? 19 : 16, isSelected ? 19 : 16]
-      });
-
-      const marker = L.marker([station.latitude, station.longitude], {
-        icon: panoIcon,
-        draggable: true,
-        zIndexOffset: isSelected ? 500 : 250
-      });
-
-      marker.bindTooltip(
-        `<b>${station.nome}</b> (360° × 180°)<br/>` +
-          `Alt: ${station.altitude} m AGL<br/>` +
-          `Heading: ${station.headingInicial}° | ${station.numeroFotos} fotos (${station.numeroWaypoints} WP)<br/>` +
-          `<span style="color:#34d399;">${station.assignedMissionName || 'Missão 1'}</span>`,
-        { direction: 'top', offset: [0, -18], className: 'custom-leaflet-tooltip' }
-      );
-
-      marker.on('click', () => {
-        if (onSelectPanorama) onSelectPanorama(station);
-      });
-
-      marker.on('dragend', (e: any) => {
-        const latlng = e.target.getLatLng();
-        if (setPanoramaStations) {
-          setPanoramaStations((prev) =>
-            prev.map((s) => (s.id === station.id ? { ...s, latitude: latlng.lat, longitude: latlng.lng } : s))
-          );
-        }
-      });
-
-      panoGroup.addLayer(marker);
-    });
-  }, [panoramaStations, selectedPanoramaId, onSelectPanorama, setPanoramaStations]);
-
   // Render Live Simulation Drone Icon, Flown Trail and Photo Flash
   useEffect(() => {
     if (!mapRef.current) return;
@@ -1147,25 +1016,6 @@ export const MapView: React.FC<MapViewProps> = ({
               <span>Decolagem (Home)</span>
             </button>
 
-            <button
-              id="btn-add-panorama"
-              onClick={() => setDrawingMode(drawingMode === 'panorama' ? 'none' : 'panorama')}
-              className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
-                drawingMode === 'panorama'
-                  ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/30 font-bold ring-2 ring-emerald-300'
-                  : 'text-slate-200 hover:bg-slate-800'
-              }`}
-              title="Clique no mapa para posicionar uma Estação Panorâmica 360°"
-            >
-              <Camera className="w-3.5 h-3.5 text-emerald-400" />
-              <span>360° Pan</span>
-              {panoramaStations.length > 0 && (
-                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700">
-                  {panoramaStations.length}
-                </span>
-              )}
-            </button>
-
             {polygon.length > 0 && (
               <button
                 id="btn-clear-drawing"
@@ -1245,7 +1095,6 @@ export const MapView: React.FC<MapViewProps> = ({
               <span>
                 {drawingMode === 'corridor' && 'Clique no mapa ao longo da rodovia/canal/linha.'}
                 {drawingMode === 'takeoff' && 'Clique onde o drone irá decolar para registrar a cota de referência.'}
-                {drawingMode === 'panorama' && 'Clique no mapa para posicionar uma Estação Panorâmica 360° (33 fotos / 66 waypoints).'}
               </span>
             </div>
           )}

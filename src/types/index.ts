@@ -24,42 +24,7 @@ export type FinishAction = 'RTH' | 'HOVER' | 'LAND' | 'GOTO_FIRST';
 
 export type PhotoTriggerMode = 'distance' | 'time' | 'waypoint';
 
-export type DrawingMode = 'none' | 'polygon' | 'corridor' | 'takeoff' | 'edit_polygon' | 'panorama';
-
-export type PanoramaType = 'panorama_360_completo' | 'panorama_parcial_teste';
-
-export interface PanoramaStation {
-  id: string; // e.g. "PANO_001"
-  nome: string; // e.g. "Panorama 01"
-  latitude: number;
-  longitude: number;
-  altitude: number; // m AGL
-  tipo: PanoramaType;
-  headingInicial: number; // degrees 0-359 (default 0)
-  hoverEstabilizacao: number; // seconds (default 2.5)
-  hoverFoto: number; // seconds (default 0.5)
-  numeroFotos: number; // 33 for complete, 8 for partial
-  numeroWaypoints: number; // 66 for complete, 16 for partial
-  // Configurações avançadas
-  gimbalLevel1?: number; // default +55
-  gimbalLevel2?: number; // default +15
-  gimbalLevel3?: number; // default -25
-  gimbalLevel4?: number; // default -65
-  gimbalNadir?: number; // default -90
-  horizontalStepDeg?: number; // default 45
-  photosPerLevel?: number; // default 8
-  assignedMissionIndex?: number; // 0-indexed mission partition
-  assignedMissionName?: string;
-}
-
-export interface PanoramaMissionGroup {
-  missionIndex: number;
-  missionName: string;
-  stations: PanoramaStation[];
-  waypoints: Waypoint[];
-  totalWaypoints: number;
-  totalPhotos: number;
-}
+export type DrawingMode = 'none' | 'polygon' | 'corridor' | 'takeoff' | 'edit_polygon';
 
 export interface TakeoffPoint {
   lat: number;

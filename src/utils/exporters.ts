@@ -1,12 +1,5 @@
 import JSZip from 'jszip';
-import { DroneCameraProfile, FlightConfig, Waypoint, TakeoffPoint, PanoramaStation, PanoramaMissionGroup } from '../types';
-import {
-  dividePanoramaMissions,
-  validatePanoramaStation,
-  generateMissionSummaryText,
-  getGeneratedWaypointCount,
-  getGeneratedPhotoCount
-} from './panorama';
+import { DroneCameraProfile, FlightConfig, Waypoint, TakeoffPoint } from '../types';
 
 /** Helper to trigger browser download of text/blob */
 export function downloadFile(filename: string, content: string | Blob, mimeType: string = 'text/plain') {
@@ -219,12 +212,10 @@ export function generateDjiWpmlFiles(
       const safeHeading = isNaN(wp.headingDeg) ? 0 : Math.round(wp.headingDeg);
       const safeAltitude = Math.max(2, isNaN(wp.altitudeAgl) ? defaultAltitude : wp.altitudeAgl);
       const safeSpeed = Math.max(1, isNaN(wp.speedMs) ? defaultSpeed : wp.speedMs);
-      const gimbalAngle = wp.gimbalPitchDeg !== undefined ? wp.gimbalPitchDeg : config.gimbalPitchDeg;
 
       let actionGroupXml = '';
       if (idx === 0) {
-        // First waypoint: always includes initial gimbalRotate + hover
-        const hoverTime = wp.timeToNextSec > 0 ? wp.timeToNextSec : 2.5;
+        // First waypoint: gimbalRotate + hover 2.5s + optional takePhoto
         actionGroupXml = `        <wpml:actionGroup>
           <wpml:actionGroupId>0</wpml:actionGroupId>
           <wpml:actionGroupStartIndex>0</wpml:actionGroupStartIndex>
@@ -240,7 +231,7 @@ export function generateDjiWpmlFiles(
               <wpml:gimbalHeadingYawBase>aircraft</wpml:gimbalHeadingYawBase>
               <wpml:gimbalRotateMode>absoluteAngle</wpml:gimbalRotateMode>
               <wpml:gimbalPitchRotateEnable>1</wpml:gimbalPitchRotateEnable>
-              <wpml:gimbalPitchRotateAngle>${gimbalAngle}</wpml:gimbalPitchRotateAngle>
+              <wpml:gimbalPitchRotateAngle>${config.gimbalPitchDeg}</wpml:gimbalPitchRotateAngle>
               <wpml:gimbalRollRotateEnable>0</wpml:gimbalRollRotateEnable>
               <wpml:gimbalRollRotateAngle>0</wpml:gimbalRollRotateAngle>
               <wpml:gimbalYawRotateEnable>0</wpml:gimbalYawRotateEnable>
@@ -252,7 +243,7 @@ export function generateDjiWpmlFiles(
             <wpml:actionId>1</wpml:actionId>
             <wpml:actionActuatorFunc>hover</wpml:actionActuatorFunc>
             <wpml:actionActuatorFuncParam>
-              <wpml:hoverTime>${hoverTime}</wpml:hoverTime>
+              <wpml:hoverTime>2.5</wpml:hoverTime>
             </wpml:actionActuatorFuncParam>
           </wpml:action>
           ${
@@ -268,44 +259,8 @@ export function generateDjiWpmlFiles(
           }
         </wpml:actionGroup>
 `;
-      } else if (!wp.isPhotoPoint && (wp.action === 'turn' || wp.timeToNextSec > 0)) {
-        // Stabilization waypoint in 360 Panorama (gimbal orientation + stabilization hover)
-        const hoverTime = wp.timeToNextSec > 0 ? wp.timeToNextSec : 2.5;
-        actionGroupXml = `        <wpml:actionGroup>
-          <wpml:actionGroupId>${idx}</wpml:actionGroupId>
-          <wpml:actionGroupStartIndex>${idx}</wpml:actionGroupStartIndex>
-          <wpml:actionGroupEndIndex>${idx}</wpml:actionGroupEndIndex>
-          <wpml:actionGroupMode>sequence</wpml:actionGroupMode>
-          <wpml:actionTrigger>
-            <wpml:actionTriggerType>reachPoint</wpml:actionTriggerType>
-          </wpml:actionTrigger>
-          <wpml:action>
-            <wpml:actionId>0</wpml:actionId>
-            <wpml:actionActuatorFunc>gimbalRotate</wpml:actionActuatorFunc>
-            <wpml:actionActuatorFuncParam>
-              <wpml:gimbalHeadingYawBase>aircraft</wpml:gimbalHeadingYawBase>
-              <wpml:gimbalRotateMode>absoluteAngle</wpml:gimbalRotateMode>
-              <wpml:gimbalPitchRotateEnable>1</wpml:gimbalPitchRotateEnable>
-              <wpml:gimbalPitchRotateAngle>${gimbalAngle}</wpml:gimbalPitchRotateAngle>
-              <wpml:gimbalRollRotateEnable>0</wpml:gimbalRollRotateEnable>
-              <wpml:gimbalRollRotateAngle>0</wpml:gimbalRollRotateAngle>
-              <wpml:gimbalYawRotateEnable>0</wpml:gimbalYawRotateEnable>
-              <wpml:gimbalYawRotateAngle>0</wpml:gimbalYawRotateAngle>
-              <wpml:payloadPositionIndex>0</wpml:payloadPositionIndex>
-            </wpml:actionActuatorFuncParam>
-          </wpml:action>
-          <wpml:action>
-            <wpml:actionId>1</wpml:actionId>
-            <wpml:actionActuatorFunc>hover</wpml:actionActuatorFunc>
-            <wpml:actionActuatorFuncParam>
-              <wpml:hoverTime>${hoverTime}</wpml:hoverTime>
-            </wpml:actionActuatorFuncParam>
-          </wpml:action>
-        </wpml:actionGroup>
-`;
       } else if (wp.isPhotoPoint) {
-        // Photo point: takePhoto + optional post-photo hover
-        const hasPostHover = wp.timeToNextSec > 0;
+        // Subsequent photo points: single takePhoto action without fileSuffix
         actionGroupXml = `        <wpml:actionGroup>
           <wpml:actionGroupId>${idx}</wpml:actionGroupId>
           <wpml:actionGroupStartIndex>${idx}</wpml:actionGroupStartIndex>
@@ -321,25 +276,9 @@ export function generateDjiWpmlFiles(
               <wpml:payloadPositionIndex>0</wpml:payloadPositionIndex>
             </wpml:actionActuatorFuncParam>
           </wpml:action>
-          ${
-            hasPostHover
-              ? `<wpml:action>
-            <wpml:actionId>1</wpml:actionId>
-            <wpml:actionActuatorFunc>hover</wpml:actionActuatorFunc>
-            <wpml:actionActuatorFuncParam>
-              <wpml:hoverTime>${wp.timeToNextSec}</wpml:hoverTime>
-            </wpml:actionActuatorFuncParam>
-          </wpml:action>`
-              : ''
-          }
         </wpml:actionGroup>
 `;
       }
-
-      // Check if this waypoint uses custom heading or standard wayline following
-      const isCustomHeading = !isNaN(wp.headingDeg) && (wp.headingDeg > 0 || wp.action === 'turn' || wp.isPhotoPoint);
-      const headingMode = isCustomHeading ? 'smoothTransition' : 'followWayline';
-      const headingAngle = isCustomHeading ? safeHeading : 0;
 
       placemarksStr += `      <Placemark>
         <wpml:index>${idx}</wpml:index>
@@ -349,8 +288,8 @@ export function generateDjiWpmlFiles(
         <wpml:executeHeight>${safeAltitude.toFixed(2)}</wpml:executeHeight>
         <wpml:waypointSpeed>${safeSpeed.toFixed(1)}</wpml:waypointSpeed>
         <wpml:waypointHeadingParam>
-          <wpml:waypointHeadingMode>${headingMode}</wpml:waypointHeadingMode>
-          <wpml:waypointHeadingAngle>${headingAngle}</wpml:waypointHeadingAngle>
+          <wpml:waypointHeadingMode>followWayline</wpml:waypointHeadingMode>
+          <wpml:waypointHeadingAngle>0</wpml:waypointHeadingAngle>
         </wpml:waypointHeadingParam>
         <wpml:waypointTurnParam>
           <wpml:waypointTurnMode>coordinateTurn</wpml:waypointTurnMode>
@@ -588,116 +527,6 @@ export async function exportDjiKmz(
     const masterBlob = await masterZip.generateAsync({ type: 'blob' });
     downloadFile(`${cleanFilename(missionName)}_DJI_Dividido_${numParts}_Partes.zip`, masterBlob, 'application/zip');
   }
-}
-
-/**
- * Exportador especializado para Estações Panorâmicas 360° DJI Fly (KMZ/WPML)
- * Respeita a regra estrita de não divisão de estações entre arquivos KMZ.
- * Se houver apenas 1 missão (até 3 panoramas = 198 WP): baixa Nome_DJI.kmz
- * Se houver >1 missões: gera ZIP com Nome_DJI_Missao_01_de_03.kmz, etc. + resumo_missoes.txt
- */
-export async function exportPanoramaDjiKmz(
-  projectName: string,
-  stations: PanoramaStation[],
-  camera: DroneCameraProfile,
-  config: FlightConfig,
-  terrainElevationMap?: Record<string, number>
-): Promise<{ success: boolean; message: string; groups: PanoramaMissionGroup[] }> {
-  if (stations.length === 0) {
-    throw new Error('Nenhuma estação panorâmica 360° foi encontrada para exportar.');
-  }
-
-  // 1. Validação estrita de cada estação
-  for (const st of stations) {
-    const val = validatePanoramaStation(st);
-    if (!val.valid) {
-      throw new Error(val.error || `Estação ${st.nome} contém dados inválidos.`);
-    }
-  }
-
-  // 2. Divisão automática de missões (max 200 WP, estação indivisível)
-  const maxWp = config.maxWaypointsPerFile || 200;
-  const groups = dividePanoramaMissions(stations, projectName, maxWp, config.flightSpeedMs, terrainElevationMap);
-
-  if (groups.length === 0) {
-    throw new Error('Falha ao processar grupos de missões panorâmicas.');
-  }
-
-  const totalStations = stations.length;
-  const totalPhotos = groups.reduce((acc, g) => acc + g.totalPhotos, 0);
-  const totalWaypoints = groups.reduce((acc, g) => acc + g.totalWaypoints, 0);
-
-  if (groups.length === 1) {
-    // Single KMZ file
-    const singleGroup = groups[0];
-    const { templateKml, waylinesWpml } = generateDjiWpmlFiles(
-      projectName,
-      singleGroup.waypoints,
-      camera,
-      config
-    );
-
-    // Validação estrita
-    validateDjiFlyKmz(templateKml, waylinesWpml, singleGroup.waypoints);
-
-    const zip = new JSZip();
-    zip.file('template.kml', templateKml);
-    zip.file('waylines.wpml', waylinesWpml);
-
-    const content = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.google-earth.kmz' });
-    downloadFile(`${cleanFilename(projectName)}_DJI.kmz`, content, 'application/vnd.google-earth.kmz');
-  } else {
-    // Multi-mission export: Master ZIP with individual KMZs + resumo_missoes.txt
-    const masterZip = new JSZip();
-    const numGroups = groups.length;
-
-    for (let i = 0; i < numGroups; i++) {
-      const group = groups[i];
-      const padI = String(i + 1).padStart(2, '0');
-      const padN = String(numGroups).padStart(2, '0');
-      const fileBaseName = `${cleanFilename(projectName)}_DJI_Missao_${padI}_de_${padN}`;
-
-      const { templateKml, waylinesWpml } = generateDjiWpmlFiles(
-        fileBaseName,
-        group.waypoints,
-        camera,
-        config
-      );
-
-      validateDjiFlyKmz(templateKml, waylinesWpml, group.waypoints);
-
-      const partZip = new JSZip();
-      partZip.file('template.kml', templateKml);
-      partZip.file('waylines.wpml', waylinesWpml);
-
-      const partBlob = await partZip.generateAsync({ type: 'blob', mimeType: 'application/vnd.google-earth.kmz' });
-      masterZip.file(`${fileBaseName}.kmz`, partBlob);
-    }
-
-    // resumo_missoes.txt
-    const summaryText = generateMissionSummaryText(projectName, groups, totalStations);
-    masterZip.file('resumo_missoes.txt', summaryText);
-
-    const masterBlob = await masterZip.generateAsync({ type: 'blob' });
-    downloadFile(`${cleanFilename(projectName)}_360_DJI_Missoes.zip`, masterBlob, 'application/zip');
-  }
-
-  const missionListSummary = groups
-    .map((g, idx) => `• Missão ${String(idx + 1).padStart(2, '0')} — ${g.totalWaypoints} WP (${g.stations.length} panoramas: ${g.stations.map((s) => s.nome).join(', ')})`)
-    .join('\n');
-
-  const message = `Exportação concluída com sucesso!\n\n` +
-    `Estações panorâmicas: ${totalStations}\n` +
-    `Fotografias previstas: ${totalPhotos}\n` +
-    `Waypoints totais: ${totalWaypoints}\n\n` +
-    `O projeto foi estruturado em ${groups.length} ${groups.length === 1 ? 'missão DJI' : 'missões DJI'}:\n${missionListSummary}\n\n` +
-    `Nenhuma estação panorâmica foi dividida entre arquivos.`;
-
-  return {
-    success: true,
-    message,
-    groups
-  };
 }
 
 /** Generate Litchi CSV format */

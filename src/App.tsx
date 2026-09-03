@@ -8,8 +8,7 @@ import {
   TakeoffPoint,
   ElevationPoint,
   SimDronePosition,
-  DrawingMode,
-  PanoramaStation
+  DrawingMode
 } from './types';
 import { DRONE_PROFILES, DEFAULT_FLIGHT_CONFIG } from './constants/drones';
 import { SAMPLE_MISSIONS } from './constants/sampleMissions';
@@ -33,10 +32,6 @@ export default function App() {
   // Geographic state (starts clean without initial flight plan)
   const [polygon, setPolygon] = useState<[number, number][]>([]);
   const [takeoffPoint, setTakeoffPoint] = useState<TakeoffPoint | undefined>(undefined);
-
-  // 360° Panorama Stations state
-  const [panoramaStations, setPanoramaStations] = useState<PanoramaStation[]>([]);
-  const [selectedPanoramaId, setSelectedPanoramaId] = useState<string | null>(null);
 
   // Calculated flight plan
   const [flightLines, setFlightLines] = useState<FlightLine[]>([]);
@@ -258,10 +253,6 @@ export default function App() {
             gridType={config.gridType}
             drawingMode={drawingMode}
             setDrawingMode={setDrawingMode}
-            panoramaStations={panoramaStations}
-            setPanoramaStations={setPanoramaStations}
-            selectedPanoramaId={selectedPanoramaId}
-            onSelectPanorama={(st) => setSelectedPanoramaId(st.id)}
           />
         </main>
 
@@ -293,10 +284,6 @@ export default function App() {
           onDronePositionChange={setSimDronePosition}
           selectedWaypointId={selectedWaypointId}
           onSelectWaypoint={(wp) => setSelectedWaypointId(wp.id)}
-          panoramaStations={panoramaStations}
-          setPanoramaStations={setPanoramaStations}
-          selectedPanoramaId={selectedPanoramaId}
-          setSelectedPanoramaId={setSelectedPanoramaId}
         />
       </div>
 

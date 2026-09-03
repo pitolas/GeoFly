@@ -8,8 +8,7 @@ import {
   ElevationPoint,
   GridType,
   SimDronePosition,
-  DrawingMode,
-  PanoramaStation
+  DrawingMode
 } from '../types';
 import { DRONE_PROFILES } from '../constants/drones';
 import { SAMPLE_MISSIONS } from '../constants/sampleMissions';
@@ -27,7 +26,6 @@ import { ElevationProfileChart } from './ElevationProfileChart';
 import { FlightSimulator } from './FlightSimulator';
 import { PreflightChecklist } from './PreflightChecklist';
 import { WaypointsTable } from './WaypointsTable';
-import { PanoramaPanel } from './PanoramaPanel';
 import {
   Layers,
   Plane,
@@ -78,14 +76,9 @@ interface SidebarProps {
   onDronePositionChange: (pos: SimDronePosition | null) => void;
   selectedWaypointId?: number | null;
   onSelectWaypoint?: (wp: Waypoint) => void;
-  panoramaStations: PanoramaStation[];
-  setPanoramaStations: React.Dispatch<React.SetStateAction<PanoramaStation[]>>;
-  selectedPanoramaId: string | null;
-  setSelectedPanoramaId: (id: string | null) => void;
-  onFocusPanorama?: (station: PanoramaStation) => void;
 }
 
-export type SidebarTab = 'params' | 'panorama' | 'terrain' | 'waypoints' | 'export' | 'simulation' | 'checklist';
+export type SidebarTab = 'params' | 'terrain' | 'waypoints' | 'export' | 'simulation' | 'checklist';
 
 export const Sidebar: React.FC<SidebarProps> = ({
   missionName = 'Missao_GeoFly',
@@ -97,7 +90,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   polygon,
   setPolygon,
   drawingMode = 'none',
-  setDrawingMode = (_mode: DrawingMode) => {},
+  setDrawingMode,
   waypoints,
   takeoffPoint,
   elevationProfile,
@@ -113,12 +106,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setIsSimulating,
   onDronePositionChange,
   selectedWaypointId,
-  onSelectWaypoint,
-  panoramaStations,
-  setPanoramaStations,
-  selectedPanoramaId,
-  setSelectedPanoramaId,
-  onFocusPanorama
+  onSelectWaypoint
 }) => {
   const [activeTab, setActiveTab] = useState<SidebarTab>('params');
   const [exportLoading, setExportLoading] = useState(false);
@@ -208,25 +196,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         >
           <Sliders className="w-3.5 h-3.5" />
           <span>Voo</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('panorama')}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-            activeTab === 'panorama'
-              ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-          }`}
-        >
-          <Camera className="w-3.5 h-3.5" />
-          <span>360° Panorama</span>
-          {panoramaStations.length > 0 && (
-            <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
-              activeTab === 'panorama' ? 'bg-slate-950 text-emerald-400' : 'bg-emerald-500/20 text-emerald-400'
-            }`}>
-              {panoramaStations.length}
-            </span>
-          )}
         </button>
 
         <button
@@ -337,22 +306,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span>Importar KML/KMZ</span>
           </button>
         </div>
-
-        {/* TAB 0: 360° PANORAMA STATIONS */}
-        {activeTab === 'panorama' && (
-          <PanoramaPanel
-            missionName={missionName}
-            stations={panoramaStations}
-            setStations={setPanoramaStations}
-            selectedStationId={selectedPanoramaId}
-            setSelectedStationId={setSelectedPanoramaId}
-            selectedDrone={selectedDrone}
-            config={config}
-            drawingMode={drawingMode}
-            setDrawingMode={setDrawingMode}
-            onFocusStation={onFocusPanorama}
-          />
-        )}
 
         {/* TAB 1: FLIGHT PARAMETERS */}
         {activeTab === 'params' && (
