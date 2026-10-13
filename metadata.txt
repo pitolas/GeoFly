@@ -1,0 +1,20 @@
+[general]
+name=GeoFly QGIS
+qgisMinimumVersion=3.34
+qgisMaximumVersion=3.99
+description=Photogrammetric flight planning with flight lines, waypoints, GSD, terrain following and DJI Fly KMZ export.
+version=1.2.1
+author=Pítolas Armini B. da Silva
+email=arminipitolas@gmail.com
+about=GeoFly QGIS plans photogrammetric missions directly in QGIS from a selected polygon, with configurable AGL altitude, front/side overlap, flight direction, speed, gimbal, cross-grid flight, camera footprint/GSD and optional terrain following from a loaded DEM/DTM raster. DJI Fly KMZ export was field-validated with DJI Mini 4 Pro. Native DJI Fly export profiles, derived from DJI Fly-generated KMZ references, are available experimentally for DJI Mini 5 Pro, DJI Mini 3 Pro, DJI Lito X1 and DJI Lito 1. These profiles must be field-tested cautiously before operational use. DJI Fly has no generic KMZ import button: create and save a placeholder waypoint mission in DJI Fly, then replace that mission KMZ with the GeoFly export while preserving the original filename. Other drone profiles shown in the selector are intended for planning when export is not enabled for that model. / Em português: o GeoFly QGIS planeja missões fotogramétricas no QGIS e pode acompanhar o relevo por raster. Para usar o KMZ exportado no DJI Fly, crie antes uma missão de waypoints no aplicativo e substitua o KMZ dessa missão pelo arquivo do GeoFly, mantendo exatamente o mesmo nome.
+category=Vector
+tags=drone,uav,flight planning,photogrammetry,dji,waypoint,kmz,terrain,dem,mapping
+deprecated=False
+experimental=False
+homepage=https://github.com/pitolas/GeoFly-QGIS
+repository=https://github.com/pitolas/GeoFly-QGIS
+tracker=https://github.com/pitolas/GeoFly-QGIS/issues
+icon=icons/geofly.png
+server=False
+hasProcessingProvider=False
+changelog=1.2.1 - Mini 3 Pro passa a usar o formato nativo confirmado por KMZ gerado pelo próprio DJI Fly: pasta wpmz, namespace uav.com/wpmz/1.0.2, droneEnumValue 68 e sem payloadInfo. Mini 4 Pro permanece inalterado no perfil validado em campo.
